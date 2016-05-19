@@ -84,7 +84,7 @@ public class NumberRangeMeta extends BaseStepMeta implements StepMetaInterface {
   }
 
   public String getXML() {
-    StringBuffer retval = new StringBuffer();
+    StringBuilder retval = new StringBuilder();
 
     retval.append( "    " ).append( XMLHandler.addTagValue( "inputField", inputField ) );
     retval.append( "    " ).append( XMLHandler.addTagValue( "outputField", outputField ) );
@@ -268,6 +268,10 @@ public class NumberRangeMeta extends BaseStepMeta implements StepMetaInterface {
   public void addRule( double lowerBound, double upperBound, String value ) {
     NumberRangeRule rule = new NumberRangeRule( lowerBound, upperBound, value );
     rules.add( rule );
+  }
+
+  public void setRules( List<NumberRangeRule> rules ) {
+    this.rules = rules;
   }
 
   public boolean supportsErrorHandling() {

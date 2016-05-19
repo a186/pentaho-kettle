@@ -22,6 +22,11 @@
 
 package org.pentaho.di.trans.cluster;
 
+import java.security.InvalidKeyException;
+import java.security.Key;
+import java.security.KeyPair;
+import java.security.PrivateKey;
+import java.security.PublicKey;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -33,13 +38,17 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
 
+import javax.crypto.IllegalBlockSizeException;
+
 import org.pentaho.di.cluster.ClusterSchema;
 import org.pentaho.di.cluster.SlaveServer;
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.NotePadMeta;
+import org.pentaho.di.core.encryption.CertificateGenEncryptUtil;
 import org.pentaho.di.core.exception.KettleException;
 import org.pentaho.di.core.logging.TransLogTable;
 import org.pentaho.di.core.xml.XMLHandler;
+import org.pentaho.di.i18n.BaseMessages;
 import org.pentaho.di.partition.PartitionSchema;
 import org.pentaho.di.repository.Repository;
 import org.pentaho.di.trans.SlaveStepCopyPartitionDistribution;
@@ -62,6 +71,7 @@ import org.pentaho.di.trans.steps.socketwriter.SocketWriterMeta;
  *
  */
 public class TransSplitter {
+  private static Class<?> PKG = TransMeta.class;
   private static final int FANOUT = 30;
   private static final int SPLIT = 120;
 
@@ -285,7 +295,8 @@ public class TransSplitter {
    *          the slave server to reference
    * @return
    */
-  private TransMeta getSlaveTransformation( ClusterSchema clusterSchema, SlaveServer slaveServer ) throws KettleException {
+  private TransMeta getSlaveTransformation( ClusterSchema clusterSchema,
+      SlaveServer slaveServer ) throws KettleException {
     TransMeta slave = slaveTransMap.get( slaveServer );
     if ( slave == null ) {
       slave = getOriginalCopy( true, clusterSchema, slaveServer );
@@ -294,7 +305,8 @@ public class TransSplitter {
     return slave;
   }
 
-  private TransMeta getOriginalCopy( boolean isSlaveTrans, ClusterSchema clusterSchema, SlaveServer slaveServer ) throws KettleException {
+  private TransMeta getOriginalCopy( boolean isSlaveTrans, ClusterSchema clusterSchema,
+      SlaveServer slaveServer ) throws KettleException {
     TransMeta transMeta = new TransMeta();
     transMeta.setSlaveTransformation( true );
 
@@ -453,6 +465,26 @@ public class TransSplitter {
       List<SlaveServer> slaveServers = clusterSchema.getSlaveServers();
       int nrSlavesNodes = clusterSchema.findNrSlaves();
 
+      boolean encrypt = false;
+      byte[] transformationKey = null;
+      PublicKey pubK = null;
+      if ( encrypt ) {
+        KeyPair pair = CertificateGenEncryptUtil.generateKeyPair();
+        pubK = pair.getPublic();
+        PrivateKey privK = pair.getPrivate();
+
+        Key key1 = CertificateGenEncryptUtil.generateSingleKey();
+        try {
+          transformationKey = CertificateGenEncryptUtil.encodeKeyForTransmission( privK, key1 );
+        } catch ( InvalidKeyException ex ) {
+          masterTransMeta.getLogChannel().logError( "Invalid key was used for encoding", ex );
+        } catch ( IllegalBlockSizeException ex ) {
+          masterTransMeta.getLogChannel().logError( "Error happenned during key encoding", ex );
+        } catch ( Exception ex ) {
+          masterTransMeta.getLogChannel().logError( "Error happenned during encryption initialization", ex );
+        }
+      }
+
       for ( int r = 0; r < referenceSteps.length; r++ ) {
         StepMeta referenceStep = referenceSteps[r];
 
@@ -536,13 +568,12 @@ public class TransSplitter {
                   // FIXME check this code, it no longer is relevant after the change to use determineNrOfStepCopies().
                   // It probably wasn't working before either.
                   //
-                  // if (masterStep.getCopies()!=1 && masterStep.getCopies()!=nrOfSourceCopies) {
-                  // throw new
-                  // KettleException("The number of step copies on the master has to be 1 or equal to the number of
-                  // slaves
-                  // ("+nrSlavesNodes+") to work. Note that you can insert a dummy step to make the transformation work
-                  // as desired.");
-                  // }
+                  if ( masterStep.getCopies() != 1 && masterStep.getCopies() != nrOfSourceCopies ) {
+                    // this case might be handled correctly later
+                    String message = BaseMessages.getString( PKG, "TransSplitter.Clustering.CopyNumberStep", nrSlavesNodes,
+                        previousStep.getName(), masterStep.getName() );
+                    throw new KettleException( message );
+                  }
 
                   // Add the required remote input and output steps to make the partitioning a reality.
                   //
@@ -570,6 +601,8 @@ public class TransSplitter {
                         masterStepCopyNr, sourceSlaveServer.getName(), masterSlaveServer.getName(),
                         socketsBufferSize, compressingSocketStreams, originalTransformation
                           .getStepFields( previousStep ) );
+                    remoteMasterStep.setEncryptingStreams( encrypt );
+                    remoteMasterStep.setKey( transformationKey );
                     masterStep.getRemoteInputSteps().add( remoteMasterStep );
 
                     RemoteStep remoteSlaveStep =
@@ -579,6 +612,8 @@ public class TransSplitter {
                         masterStepCopyNr, sourceSlaveServer.getName(), masterSlaveServer.getName(),
                         socketsBufferSize, compressingSocketStreams, originalTransformation
                           .getStepFields( previousStep ) );
+                    remoteSlaveStep.setEncryptingStreams( encrypt );
+                    remoteSlaveStep.setKey( transformationKey );
                     slaveStep.getRemoteOutputSteps().add( remoteSlaveStep );
 
                     // OK, create a partition number for the target step in the partition distribution...
@@ -712,6 +747,8 @@ public class TransSplitter {
                         referenceStep.getName(), targetCopyNr, masterSlaveServer.getName(), targetSlaveServer
                           .getName(), socketsBufferSize, compressingSocketStreams, originalTransformation
                           .getStepFields( previousStep ) );
+                    remoteMasterStep.setEncryptingStreams( encrypt );
+                    remoteMasterStep.setKey( transformationKey );
                     sourceStep.getRemoteOutputSteps().add( remoteMasterStep );
 
                     RemoteStep remoteSlaveStep =
@@ -721,6 +758,8 @@ public class TransSplitter {
                         referenceStep.getName(), targetCopyNr, masterSlaveServer.getName(), targetSlaveServer
                           .getName(), socketsBufferSize, compressingSocketStreams, originalTransformation
                           .getStepFields( previousStep ) );
+                    remoteSlaveStep.setEncryptingStreams( encrypt );
+                    remoteSlaveStep.setKey( transformationKey );
                     targetStep.getRemoteInputSteps().add( remoteSlaveStep );
 
                     // OK, create a partition number for the target step in the partition distribution...
@@ -922,6 +961,8 @@ public class TransSplitter {
                                     .getName(), targetCopyNr, targetSlaveServer.getName(), sourceSlaveServer
                                     .getName(), socketsBufferSize, compressingSocketStreams,
                                   originalTransformation.getStepFields( previousStep ) );
+                              remoteOutputStep.setEncryptingStreams( encrypt );
+                              remoteOutputStep.setKey( transformationKey );
                               sourceStep.getRemoteOutputSteps().add( remoteOutputStep );
 
                               // OK, so the source step is sending rows out on the reserved ports
@@ -938,6 +979,8 @@ public class TransSplitter {
                                     .getName(), targetCopyNr, sourceSlaveServer.getName(), targetSlaveServer
                                     .getName(), socketsBufferSize, compressingSocketStreams,
                                   originalTransformation.getStepFields( previousStep ) );
+                              remoteInputStep.setEncryptingStreams( encrypt );
+                              remoteInputStep.setKey( transformationKey );
                               targetStep.getRemoteInputSteps().add( remoteInputStep );
                             }
                             // OK, save the partition number for the target step in the partition distribution...
@@ -1333,9 +1376,23 @@ public class TransSplitter {
       //
       for ( TransMeta transMeta : slaveTransMap.values() ) {
         transMeta.setSlaveStepCopyPartitionDistribution( slaveStepCopyPartitionDistribution );
+        if ( encrypt ) {
+          transMeta.setKey( pubK.getEncoded() );
+          transMeta.setPrivateKey( false );
+        }
         transMeta.clearChanged();
       }
+      // do not erase partitioning schema for master transformation
+      // if some of steps is expected to run on master partitioned, that is the case
+      // when partition schema should exists as 'local' partition schema instead of slave's remote one
+      // see PDI-12766
+      masterTransMeta.setPartitionSchemas( originalTransformation.getPartitionSchemas() );
+
       masterTransMeta.setSlaveStepCopyPartitionDistribution( slaveStepCopyPartitionDistribution );
+      if ( encrypt ) {
+        masterTransMeta.setKey( pubK.getEncoded() );
+        masterTransMeta.setPrivateKey( !false );
+      }
       masterTransMeta.clearChanged();
 
       // We're absolutely done here...

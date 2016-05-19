@@ -2,7 +2,7 @@
  *
  * Pentaho Data Integration
  *
- * Copyright (C) 2002-2013 by Pentaho : http://www.pentaho.com
+ * Copyright (C) 2002-2016 by Pentaho : http://www.pentaho.com
  *
  *******************************************************************************
  *
@@ -31,9 +31,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.SortedMap;
+import java.util.SortedSet;
 import java.util.TreeMap;
+import java.util.TreeSet;
 
 import org.apache.commons.lang.StringUtils;
+import org.eclipse.swt.widgets.Display;
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.database.BaseDatabaseMeta;
 import org.pentaho.di.core.database.DatabaseConnectionPoolParameter;
@@ -42,12 +45,12 @@ import org.pentaho.di.core.database.DatabaseMeta;
 import org.pentaho.di.core.database.GenericDatabaseMeta;
 import org.pentaho.di.core.database.MSSQLServerNativeDatabaseMeta;
 import org.pentaho.di.core.database.PartitionDatabaseMeta;
-import org.pentaho.di.core.database.SAPR3DatabaseMeta;
-import org.pentaho.di.core.exception.KettlePluginException;
+import org.pentaho.di.core.exception.KettleException;
 import org.pentaho.di.core.logging.LogChannel;
 import org.pentaho.di.core.plugins.DatabasePluginType;
 import org.pentaho.di.core.plugins.PluginInterface;
 import org.pentaho.di.core.plugins.PluginRegistry;
+import org.pentaho.di.core.plugins.PluginTypeListener;
 import org.pentaho.ui.database.Messages;
 import org.pentaho.ui.util.Launch;
 import org.pentaho.ui.util.Launch.Status;
@@ -71,19 +74,22 @@ import org.pentaho.ui.xul.impl.AbstractXulEventHandler;
 
 /**
  * Handles all manipulation of the DatabaseMeta, data retrieval from XUL DOM and rudimentary validation.
- *
+ * <p/>
  * TODO: 2. Needs to be abstracted away from the DatabaseMeta object, so other tools in the platform can use the dialog
  * and their preferred database object. 3. Needs exception handling, string resourcing and logging
  *
  * @author gmoran
  * @created Mar 19, 2008
- *
  */
 public class DataHandler extends AbstractXulEventHandler {
 
-  public static final SortedMap<String, DatabaseInterface> connectionMap =
-    new TreeMap<String, DatabaseInterface>();
-  public static final Map<String, String> connectionNametoID = new HashMap<String, String>();
+  public static final SortedMap<String, DatabaseInterface> connectionMap = new TreeMap<>();
+  public static final Map<String, String> connectionNametoID = new HashMap<>();
+
+  // Kettle thin related
+  private static final String WEB_APPLICATION_NAME = "WEB_APPLICATION_NAME";
+  private static final String EXTRA_OPTION_WEB_APPLICATION_NAME = BaseDatabaseMeta.ATTRIBUTE_PREFIX_EXTRA_OPTION
+      + "KettleThin.webappname";
 
   // The connectionMap allows us to keep track of the connection
   // type we are working with and the correlating database interface
@@ -92,21 +98,22 @@ public class DataHandler extends AbstractXulEventHandler {
     PluginRegistry registry = PluginRegistry.getInstance();
 
     List<PluginInterface> plugins = registry.getPlugins( DatabasePluginType.class );
-    for ( PluginInterface plugin : plugins ) {
-      try {
-        DatabaseInterface databaseInterface = (DatabaseInterface) registry.loadClass( plugin );
-        databaseInterface.setPluginId( plugin.getIds()[0] );
-        databaseInterface.setName( plugin.getName() );
-        connectionMap.put( plugin.getName(), databaseInterface );
-        connectionNametoID.put( plugin.getName(), plugin.getIds()[0] );
-      } catch ( KettlePluginException cnfe ) {
-        System.out.println( "Could not create connection entry for "
-          + plugin.getName() + ".  " + cnfe.getCause().getClass().getName() );
-        LogChannel.GENERAL.logError( "Could not create connection entry for "
-          + plugin.getName() + ".  " + cnfe.getCause().getClass().getName() );
-      } catch ( Exception e ) {
-        throw new RuntimeException( "Error creating class for: " + plugin, e );
+
+    PluginTypeListener databaseTypeListener = new DatabaseTypeListener( registry ) {
+      public void databaseTypeAdded( String pluginName, DatabaseInterface databaseInterface ) {
+        connectionMap.put( pluginName, databaseInterface );
+        connectionNametoID.put( pluginName, databaseInterface.getPluginId() );
       }
+
+      public void databaseTypeRemoved( String pluginName ) {
+        connectionMap.remove( pluginName );
+        connectionNametoID.remove( pluginName );
+      }
+    };
+
+    registry.addPluginListener( DatabasePluginType.class, databaseTypeListener );
+    for ( PluginInterface plugin : plugins ) {
+      databaseTypeListener.pluginAdded( plugin );
     }
 
   }
@@ -164,10 +171,12 @@ public class DataHandler extends AbstractXulEventHandler {
 
   // MS SQL Server specific
   private XulCheckbox doubleDecimalSeparatorCheck;
-  // private XulCheckbox mssqlIntegratedSecurity;
 
   // MySQL specific
   private XulCheckbox resultStreamingCursorCheck;
+
+  // Pentaho data services specific
+  private XulTextbox webAppName;
 
   // ==== Options Panel ==== //
 
@@ -243,9 +252,38 @@ public class DataHandler extends AbstractXulEventHandler {
 
     // Add sorted types to the listbox now.
 
-    for ( String key : connectionMap.keySet() ) {
+    final SortedSet<String> keys = new TreeSet<String>( connectionMap.keySet() );
+    for ( String key : keys ) {
       connectionBox.addItem( key );
     }
+    PluginRegistry registry = PluginRegistry.getInstance();
+    registry.addPluginListener( DatabasePluginType.class, new DatabaseTypeListener( registry ) {
+      @Override
+      public void databaseTypeAdded( String pluginName, DatabaseInterface databaseInterface ) {
+        if ( keys.add( pluginName ) ) {
+          update();
+        }
+      }
+
+      @Override
+      public void databaseTypeRemoved( String pluginName ) {
+        if ( keys.remove( pluginName ) ) {
+          update();
+        }
+      }
+
+      private void update() {
+        Display.getDefault().syncExec( new Runnable() {
+          @Override
+          public void run() {
+            connectionBox.removeItems();
+            for ( String key : keys ) {
+              connectionBox.addItem( key );
+            }
+          }
+        } );
+      }
+    } );
 
     // HACK: Need to force height of list control, as it does not behave
     // well when using relative layouting
@@ -323,7 +361,13 @@ public class DataHandler extends AbstractXulEventHandler {
 
     Map<String, String> options = null;
     if ( this.databaseMeta != null ) {
+      // Apply defaults to meta if set (only current db type will be displayed)
+      this.databaseMeta.applyDefaultOptions( database );
       options = this.databaseMeta.getExtraOptions();
+    } else {
+      // Otherwise clear and display defaults directly
+      clearOptionsData();
+      options = database.getDefaultOptions();
     }
     setOptionsData( options );
     PartitionDatabaseMeta[] clusterInfo = null;
@@ -349,6 +393,13 @@ public class DataHandler extends AbstractXulEventHandler {
         newRow.addCellText( 0, "" );
         newRow.addCellText( 1, "" );
       }
+    }
+  }
+
+  public void clearOptionsData() {
+    getControls();
+    if ( optionsParameterTree != null ) {
+      optionsParameterTree.getRootChildren().removeAll();
     }
   }
 
@@ -381,7 +432,7 @@ public class DataHandler extends AbstractXulEventHandler {
 
     // if pooling selected, check the parameter validity before allowing
     // a deck panel switch...
-    int originalSelection = dialogDeck.getSelectedIndex();
+    int originalSelection = ( dialogDeck == null ? -1 : dialogDeck.getSelectedIndex() );
 
     boolean passed = true;
     if ( originalSelection == 3 ) {
@@ -737,21 +788,29 @@ public class DataHandler extends AbstractXulEventHandler {
       return;
     }
 
+    if ( meta.getAttributes().containsKey( EXTRA_OPTION_WEB_APPLICATION_NAME ) ) {
+      meta.setDBName( (String) meta.getAttributes().get( EXTRA_OPTION_WEB_APPLICATION_NAME ) );
+      meta.getAttributes().remove( EXTRA_OPTION_WEB_APPLICATION_NAME );
+      meta.setChanged();
+    }
+
     getControls();
 
     // Name:
-    connectionNameBox.setValue( meta.getDisplayName() );
+    if ( connectionNameBox != null ) {
+      connectionNameBox.setValue( meta.getDisplayName() );
+    }
 
     PluginRegistry registry = PluginRegistry.getInstance();
     PluginInterface dInterface = registry.getPlugin( DatabasePluginType.class, meta.getPluginId() );
 
     // Connection type:
-    int index = new ArrayList<String>( connectionMap.keySet() ).indexOf( dInterface.getName() );
+    int index = ( dInterface == null ? -1 : new ArrayList<>( connectionMap.keySet() ).indexOf( dInterface.getName() ) );
     if ( index >= 0 ) {
       connectionBox.setSelectedIndex( index );
     } else {
       LogChannel.GENERAL.logError( "Unable to find database type "
-        + dInterface.getName() + " in our connection map" );
+        + ( dInterface == null ? "null" : dInterface.getName() ) + " in our connection map" );
     }
 
     // Access type:
@@ -852,7 +911,9 @@ public class DataHandler extends AbstractXulEventHandler {
   private void setReadOnly( boolean readonly ) {
     // set the readonly status of EVERYTHING!
     traverseDomSetReadOnly( document.getRootElement(), readonly );
-    noticeLabel.setVisible( readonly );
+    if ( noticeLabel != null ) {
+      noticeLabel.setVisible( readonly );
+    }
 
     if ( readonly ) {
       // now turn back on the cancel and test buttons
@@ -867,7 +928,6 @@ public class DataHandler extends AbstractXulEventHandler {
   }
 
   /**
-   *
    * @return the list of parameters that were enabled, but had invalid return values (null or empty)
    */
   private boolean checkPoolingParameters() {
@@ -1037,9 +1097,12 @@ public class DataHandler extends AbstractXulEventHandler {
       }
 
     }
-    // Add 5 blank rows if none are already there, otherwise, just add one.
+    // Have at least 5 option rows, with at least one blank
     int numToAdd = 5;
-    if ( extraOptions != null && extraOptions.keySet().size() > 0 ) {
+    int numSet = optionsParameterTree.getRootChildren().getItemCount();
+    if ( numSet < numToAdd ) {
+      numToAdd -= numSet;
+    } else {
       numToAdd = 1;
     }
     while ( numToAdd-- > 0 ) {
@@ -1178,13 +1241,13 @@ public class DataHandler extends AbstractXulEventHandler {
 
     // SAP Attributes...
     if ( languageBox != null ) {
-      meta.getAttributes().put( SAPR3DatabaseMeta.ATTRIBUTE_SAP_LANGUAGE, languageBox.getValue() );
+      meta.getAttributes().put( "SAPLanguage", languageBox.getValue() );
     }
     if ( systemNumberBox != null ) {
-      meta.getAttributes().put( SAPR3DatabaseMeta.ATTRIBUTE_SAP_SYSTEM_NUMBER, systemNumberBox.getValue() );
+      meta.getAttributes().put( "SAPSystemNumber", systemNumberBox.getValue() );
     }
     if ( clientBox != null ) {
-      meta.getAttributes().put( SAPR3DatabaseMeta.ATTRIBUTE_SAP_CLIENT, clientBox.getValue() );
+      meta.getAttributes().put( "SAPClient", clientBox.getValue() );
     }
 
     // Generic settings...
@@ -1208,6 +1271,10 @@ public class DataHandler extends AbstractXulEventHandler {
       meta.getAttributes().put(
         MSSQLServerNativeDatabaseMeta.ATTRIBUTE_USE_INTEGRATED_SECURITY,
         useIntegratedSecurity != null ? useIntegratedSecurity.toString() : "false" );
+    }
+
+    if ( webAppName != null ) {
+      meta.setDBName( webAppName.getValue() );
     }
   }
 
@@ -1264,13 +1331,13 @@ public class DataHandler extends AbstractXulEventHandler {
 
     // SAP Attributes...
     if ( languageBox != null ) {
-      languageBox.setValue( meta.getAttributes().getProperty( SAPR3DatabaseMeta.ATTRIBUTE_SAP_LANGUAGE ) );
+      languageBox.setValue( meta.getAttributes().getProperty( "SAPLanguage" ) );
     }
     if ( systemNumberBox != null ) {
-      systemNumberBox.setValue( meta.getAttributes().getProperty( SAPR3DatabaseMeta.ATTRIBUTE_SAP_SYSTEM_NUMBER ) );
+      systemNumberBox.setValue( meta.getAttributes().getProperty( "SAPSystemNumber" ) );
     }
     if ( clientBox != null ) {
-      clientBox.setValue( meta.getAttributes().getProperty( SAPR3DatabaseMeta.ATTRIBUTE_SAP_CLIENT ) );
+      clientBox.setValue( meta.getAttributes().getProperty( "SAPClient" ) );
     }
 
     // Generic settings...
@@ -1295,6 +1362,14 @@ public class DataHandler extends AbstractXulEventHandler {
         useIntegratedSecurityCheck.setChecked( Boolean.parseBoolean( useIntegratedSecurity ) );
       } else {
         useIntegratedSecurityCheck.setChecked( false );
+      }
+    }
+
+    if ( webAppName != null ) {
+      if ( Const.isEmpty( meta.getDatabaseName() ) ) {
+        webAppName.setValue( "pentaho-di" );
+      } else {
+        webAppName.setValue( meta.getDatabaseName() );
       }
     }
   }
@@ -1325,6 +1400,7 @@ public class DataHandler extends AbstractXulEventHandler {
     clientBox = (XulTextbox) document.getElementById( "client-text" );
     doubleDecimalSeparatorCheck = (XulCheckbox) document.getElementById( "decimal-separator-check" );
     resultStreamingCursorCheck = (XulCheckbox) document.getElementById( "result-streaming-check" );
+    webAppName = (XulTextbox) document.getElementById( "web-application-name-text" );
     poolingCheck = (XulCheckbox) document.getElementById( "use-pool-check" );
     clusteringCheck = (XulCheckbox) document.getElementById( "use-cluster-check" );
     clusterParameterDescriptionLabel = (XulLabel) document.getElementById( "cluster-parameter-description-label" );
@@ -1402,5 +1478,52 @@ public class DataHandler extends AbstractXulEventHandler {
         passwordBox.setDisabled( false );
       }
     }
+  }
+
+  protected abstract static class DatabaseTypeListener implements PluginTypeListener {
+    private final PluginRegistry registry;
+
+    public DatabaseTypeListener( PluginRegistry registry ) {
+      this.registry = registry;
+    }
+
+    @Override
+    public void pluginAdded( Object serviceObject ) {
+      PluginInterface plugin = (PluginInterface) serviceObject;
+      String pluginName = plugin.getName();
+      try {
+        DatabaseInterface databaseInterface = (DatabaseInterface) registry.loadClass( plugin );
+        databaseInterface.setPluginId( plugin.getIds()[0] );
+        databaseInterface.setName( pluginName );
+        databaseTypeAdded( pluginName, databaseInterface );
+      } catch ( KettleException e ) {
+        Throwable t = e;
+        if ( e.getCause() != null ) {
+          t = e.getCause();
+        }
+        System.out.println( "Could not create connection entry for "
+          + pluginName + ".  " + t.getClass().getName() );
+        LogChannel.GENERAL.logError( "Could not create connection entry for "
+          + pluginName + ".  " + t.getClass().getName() );
+      }
+    }
+
+    public abstract void databaseTypeAdded( String pluginName, DatabaseInterface databaseInterface );
+
+    @Override
+    public void pluginRemoved( Object serviceObject ) {
+      PluginInterface plugin = (PluginInterface) serviceObject;
+      String pluginName = plugin.getName();
+      databaseTypeRemoved( pluginName );
+    }
+
+    public abstract void databaseTypeRemoved( String pluginName );
+
+    @Override
+    public void pluginChanged( Object serviceObject ) {
+      pluginRemoved( serviceObject );
+      pluginAdded( serviceObject );
+    }
+
   }
 }

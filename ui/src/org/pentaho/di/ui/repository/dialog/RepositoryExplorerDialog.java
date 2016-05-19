@@ -132,6 +132,8 @@ import org.w3c.dom.Document;
 public class RepositoryExplorerDialog extends Dialog {
   private static Class<?> PKG = RepositoryExplorerDialog.class; // for i18n purposes, needed by Translator2!!
 
+  private static final String REPOSITORY_PKG = "org.pentaho.di.ui.repository";
+
   public interface RepositoryExplorerCallback {
     /**
      * request that specified object be opened in 'Spoon' display
@@ -604,8 +606,8 @@ public class RepositoryExplorerDialog extends Dialog {
           try {
             debug = "Drop item in tree";
 
-            if ( event.data == null ) // no data to copy, indicate failure in event.detail
-            {
+            if ( event.data == null ) { // no data to copy, indicate failure in event.detail
+           
               event.detail = DND.DROP_NONE;
               return;
             }
@@ -1761,7 +1763,8 @@ public class RepositoryExplorerDialog extends Dialog {
         ObjectId id = rep.getTransformationID( name, repdir );
         if ( id != null ) {
           // System.out.println("Renaming transformation ["+name+"] with ID = "+id);
-          rep.renameTransformation( id, repdir, newname );
+          String comment = BaseMessages.getString( REPOSITORY_PKG, "Repository.Rename", name, newname );
+          rep.renameTransformation( id, comment, repdir, newname );
           retval = true;
         }
       } else {
@@ -1950,7 +1953,8 @@ public class RepositoryExplorerDialog extends Dialog {
         ObjectId id = rep.getJobId( name, repdir );
         if ( id != null ) {
           System.out.println( "Renaming job [" + name + "] with ID = " + id );
-          rep.renameJob( id, repdir, newname );
+          String comment = BaseMessages.getString( REPOSITORY_PKG, "Repository.Rename", name, newname );
+          rep.renameJob( id, comment, repdir, newname );
           retval = true;
         }
       } else {
@@ -2034,7 +2038,8 @@ public class RepositoryExplorerDialog extends Dialog {
         ObjectId id = rep.getJobId( name, repdir );
         if ( id != null ) {
           // System.out.println("Renaming transformation ["+name+"] with ID = "+id);
-          rep.renameJob( id, repdir, newname );
+          String comment = BaseMessages.getString( REPOSITORY_PKG, "Repository.Rename", name, newname );
+          rep.renameJob( id, comment, repdir, newname );
           retval = true;
         } else {
           MessageBox mb = new MessageBox( shell, SWT.ICON_ERROR | SWT.OK );
@@ -2309,8 +2314,7 @@ public class RepositoryExplorerDialog extends Dialog {
           }
           // ENTER --> Save changes...
           if ( e.character == SWT.CR ) {
-            if ( ti.getText().equals( name ) ) // Only if the name wasn't changed already.
-            {
+            if ( ti.getText().equals( name ) ) { // Only if the name wasn't changed already.
               String newname = text.getText();
               if ( renameDatabase( name, newname ) ) {
                 ti.setText( newname );
@@ -2640,6 +2644,7 @@ public class RepositoryExplorerDialog extends Dialog {
       //
       SelectDirectoryDialog sdd = new SelectDirectoryDialog( shell, SWT.NONE, rep );
       RepositoryDirectoryInterface baseDirectory = sdd.open();
+      
       if ( baseDirectory != null ) {
         // Finally before importing, ask for a version comment (if applicable)
         //
@@ -2648,12 +2653,11 @@ public class RepositoryExplorerDialog extends Dialog {
         while ( !versionOk ) {
           versionComment =
             RepositorySecurityUI.getVersionComment( shell, rep, "Import of files into ["
-              + baseDirectory.getPath() + "]" );
+              + baseDirectory.getPath() + "]", "", true );
 
           // if the version comment is null, the user hit cancel, exit.
           if ( rep != null
-            && rep.getSecurityProvider() != null && rep.getSecurityProvider().allowsVersionComments()
-            && versionComment == null ) {
+            && rep.getSecurityProvider() != null && versionComment == null ) {
             return;
           }
           if ( Const.isEmpty( versionComment ) && rep.getSecurityProvider().isVersionCommentMandatory() ) {
@@ -2749,7 +2753,7 @@ public class RepositoryExplorerDialog extends Dialog {
   public void newSlaveServer() {
     try {
       SlaveServer slaveServer = new SlaveServer();
-      SlaveServerDialog dd = new SlaveServerDialog( shell, slaveServer );
+      SlaveServerDialog dd = new SlaveServerDialog( shell, slaveServer, rep.getSlaveServers() );
       if ( dd.open() ) {
         // See if this slave server already exists...
         ObjectId idSlave = rep.getSlaveID( slaveServer.getName() );

@@ -31,6 +31,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.Result;
 import org.pentaho.di.core.RowSet;
@@ -56,7 +57,7 @@ import org.pentaho.di.trans.steps.mappingoutput.MappingOutput;
 
 /**
  * Execute a mapping: a re-usuable transformation
- * 
+ *
  * @author Matt
  * @since 22-nov-2005
  */
@@ -311,7 +312,7 @@ public class Mapping extends BaseStep implements StepInterface {
 
   public void prepareMappingExecution() throws KettleException {
     initTransFromMeta();
-
+    MappingData mappingData = getData();
     // We launch the transformation in the processRow when the first row is
     // received.
     // This will allow the correct variables to be passed.
@@ -319,7 +320,7 @@ public class Mapping extends BaseStep implements StepInterface {
     // init is done.
     //
     try {
-      getData().getMappingTrans().prepareExecution( getTrans().getArguments() );
+      mappingData.getMappingTrans().prepareExecution( getTrans().getArguments() );
     } catch ( KettleException e ) {
       throw new KettleException( BaseMessages.getString( PKG, "Mapping.Exception.UnableToPrepareExecutionOfMapping" ),
           e );
@@ -327,14 +328,14 @@ public class Mapping extends BaseStep implements StepInterface {
 
     // Extra optional work to do for alternative execution engines...
     //
-    switch ( getData().mappingTransMeta.getTransformationType() ) {
+    switch (  mappingData.mappingTransMeta.getTransformationType() ) {
       case Normal:
       case SerialSingleThreaded:
         break;
 
       case SingleThreaded:
-        getData().singleThreadedTransExcecutor = new SingleThreadedTransExecutor( getData().getMappingTrans() );
-        if ( !getData().singleThreadedTransExcecutor.init() ) {
+        mappingData.singleThreadedTransExcecutor = new SingleThreadedTransExecutor( mappingData.getMappingTrans() );
+        if ( !mappingData.singleThreadedTransExcecutor.init() ) {
           throw new KettleException( BaseMessages.getString( PKG,
               "Mapping.Exception.UnableToInitSingleThreadedTransformation" ) );
         }
@@ -346,13 +347,13 @@ public class Mapping extends BaseStep implements StepInterface {
     // If there is no read/write logging step set, we can insert the data from
     // the first mapping input/output step...
     //
-    MappingInput[] mappingInputs = getData().getMappingTrans().findMappingInput();
-    LogTableField readField = getData().mappingTransMeta.getTransLogTable().findField( TransLogTable.ID.LINES_READ );
+    MappingInput[] mappingInputs = mappingData.getMappingTrans().findMappingInput();
+    LogTableField readField = mappingData.mappingTransMeta.getTransLogTable().findField( TransLogTable.ID.LINES_READ );
     if ( readField.getSubject() == null && mappingInputs != null && mappingInputs.length >= 1 ) {
       readField.setSubject( mappingInputs[0].getStepMeta() );
     }
-    MappingOutput[] mappingOutputs = getData().getMappingTrans().findMappingOutput();
-    LogTableField writeField = getData().mappingTransMeta.getTransLogTable().findField( TransLogTable.ID.LINES_WRITTEN );
+    MappingOutput[] mappingOutputs = mappingData.getMappingTrans().findMappingOutput();
+    LogTableField writeField = mappingData.mappingTransMeta.getTransLogTable().findField( TransLogTable.ID.LINES_WRITTEN );
     if ( writeField.getSubject() == null && mappingOutputs != null && mappingOutputs.length >= 1 ) {
       writeField.setSubject( mappingOutputs[0].getStepMeta() );
     }
@@ -402,7 +403,7 @@ public class Mapping extends BaseStep implements StepInterface {
 
       // What step are we writing to?
       MappingInput mappingInputTarget = null;
-      MappingInput[] mappingInputSteps = getData().getMappingTrans().findMappingInput();
+      MappingInput[] mappingInputSteps = mappingData.getMappingTrans().findMappingInput();
       if ( Const.isEmpty( inputDefinition.getOutputStepname() ) ) {
         // No target was specifically specified.
         // That means we only expect one "mapping input" step in the mapping...
@@ -456,13 +457,13 @@ public class Mapping extends BaseStep implements StepInterface {
       // What step are we reading from here?
       //
       MappingOutput mappingOutputSource =
-          (MappingOutput) getData().getMappingTrans().findRunThread( outputDefinition.getInputStepname() );
+          (MappingOutput) mappingData.getMappingTrans().findRunThread( outputDefinition.getInputStepname() );
       if ( mappingOutputSource == null ) {
         // No source step was specified: we're reading from a single Mapping
         // Output step.
         // We should verify this if this is really the case...
         //
-        MappingOutput[] mappingOutputSteps = getData().getMappingTrans().findMappingOutput();
+        MappingOutput[] mappingOutputSteps = mappingData.getMappingTrans().findMappingOutput();
 
         if ( mappingOutputSteps.length == 0 ) {
           throw new KettleException( BaseMessages.getString( PKG,
@@ -476,34 +477,9 @@ public class Mapping extends BaseStep implements StepInterface {
         mappingOutputSource = mappingOutputSteps[0];
       }
 
-      // To what step in this transformation are we writing to?
+      // To what steps in this transformation are we writing to?
       //
-      StepInterface[] targetSteps;
-      if ( !Const.isEmpty( outputDefinition.getOutputStepname() ) ) {
-        // If we have a target step specification for the output of the mapping,
-        // we need to send it over there...
-        //
-        StepInterface target = getTrans().findRunThread( outputDefinition.getOutputStepname() );
-        if ( target == null ) {
-          throw new KettleException( BaseMessages.getString( PKG, "MappingDialog.Exception.StepNameNotFound",
-              outputDefinition.getOutputStepname() ) );
-        }
-        targetSteps = new StepInterface[] { target, };
-      } else {
-        // No target step is specified.
-        // See if we can find the next steps in the transformation..
-        //
-        List<StepMeta> nextSteps = getTransMeta().findNextSteps( getStepMeta() );
-
-        // Let's send the data to all the next steps we find...
-        // The origin is the mapping output step
-        // The target is all the next steps after this mapping step.
-        //
-        targetSteps = new StepInterface[nextSteps.size()];
-        for ( int s = 0; s < targetSteps.length; s++ ) {
-          targetSteps[s] = getTrans().findRunThread( nextSteps.get( s ).getName() );
-        }
-      }
+      StepInterface[] targetSteps = pickupTargetStepsFor( outputDefinition );
 
       // Now tell the mapping output step where to look...
       // Also explain the mapping output steps how to rename the values back...
@@ -521,6 +497,40 @@ public class Mapping extends BaseStep implements StepInterface {
     // map in the parent transformation
     //
     getTrans().getActiveSubtransformations().put( getStepname(), getData().getMappingTrans() );
+  }
+
+  @VisibleForTesting StepInterface[] pickupTargetStepsFor( MappingIODefinition outputDefinition )
+    throws KettleException {
+    List<StepInterface> result;
+    if ( !Const.isEmpty( outputDefinition.getOutputStepname() ) ) {
+      // If we have a target step specification for the output of the mapping,
+      // we need to send it over there...
+      //
+      result = getTrans().findStepInterfaces( outputDefinition.getOutputStepname() );
+      if ( Const.isEmpty( result ) ) {
+        throw new KettleException( BaseMessages.getString( PKG, "MappingDialog.Exception.StepNameNotFound",
+          outputDefinition.getOutputStepname() ) );
+      }
+    } else {
+      // No target step is specified.
+      // See if we can find the next steps in the transformation..
+      //
+      List<StepMeta> nextSteps = getTransMeta().findNextSteps( getStepMeta() );
+
+      // Let's send the data to all the next steps we find...
+      // The origin is the mapping output step
+      // The target is all the next steps after this mapping step.
+      //
+      result = new ArrayList<StepInterface>();
+      for ( StepMeta nextStep : nextSteps ) {
+        // need to take into the account different copies of the step
+        List<StepInterface> copies = getTrans().findStepInterfaces( nextStep.getName() );
+        if ( copies != null ) {
+          result.addAll( copies );
+        }
+      }
+    }
+    return result.toArray( new StepInterface[ result.size() ] );
   }
 
   void initTransFromMeta() throws KettleException {
@@ -571,7 +581,7 @@ public class Mapping extends BaseStep implements StepInterface {
   public boolean init( StepMetaInterface smi, StepDataInterface sdi ) {
     meta = (MappingMeta) smi;
     setData( (MappingData) sdi );
-
+    MappingData mappingData = getData();
     if ( !super.init( smi, sdi ) ) {
       return false;
     }
@@ -580,8 +590,7 @@ public class Mapping extends BaseStep implements StepInterface {
       // Pass the repository down to the metadata object...
       //
       meta.setRepository( getTransMeta().getRepository() );
-
-      getData().mappingTransMeta = MappingMeta.loadMappingMeta( meta, meta.getRepository(),
+      mappingData.mappingTransMeta = MappingMeta.loadMappingMeta( meta, meta.getRepository(),
           meta.getMetaStore(), this, meta.getMappingParameters().isInheritingAllVariables() );
 
       if ( data.mappingTransMeta == null ) {
@@ -643,28 +652,29 @@ public class Mapping extends BaseStep implements StepInterface {
   }
 
   private void lookupStatusStepNumbers() {
-    if ( getData().getMappingTrans() != null ) {
-      List<StepMetaDataCombi> steps = getData().getMappingTrans().getSteps();
+    MappingData mappingData = getData();
+    if ( mappingData.getMappingTrans() != null ) {
+      List<StepMetaDataCombi> steps = mappingData.getMappingTrans().getSteps();
       for ( int i = 0; i < steps.size(); i++ ) {
         StepMetaDataCombi sid = steps.get( i );
         BaseStep rt = (BaseStep) sid.step;
         if ( rt.getStepname().equals( getData().mappingTransMeta.getTransLogTable().getStepnameRead() ) ) {
-          getData().linesReadStepNr = i;
+          mappingData.linesReadStepNr = i;
         }
         if ( rt.getStepname().equals( getData().mappingTransMeta.getTransLogTable().getStepnameInput() ) ) {
-          getData().linesInputStepNr = i;
+          mappingData.linesInputStepNr = i;
         }
         if ( rt.getStepname().equals( getData().mappingTransMeta.getTransLogTable().getStepnameWritten() ) ) {
-          getData().linesWrittenStepNr = i;
+          mappingData.linesWrittenStepNr = i;
         }
         if ( rt.getStepname().equals( getData().mappingTransMeta.getTransLogTable().getStepnameOutput() ) ) {
-          getData().linesOutputStepNr = i;
+          mappingData.linesOutputStepNr = i;
         }
         if ( rt.getStepname().equals( getData().mappingTransMeta.getTransLogTable().getStepnameUpdated() ) ) {
-          getData().linesUpdatedStepNr = i;
+          mappingData.linesUpdatedStepNr = i;
         }
         if ( rt.getStepname().equals( getData().mappingTransMeta.getTransLogTable().getStepnameRejected() ) ) {
-          getData().linesRejectedStepNr = i;
+          mappingData.linesRejectedStepNr = i;
         }
       }
     }
@@ -764,8 +774,8 @@ public class Mapping extends BaseStep implements StepInterface {
     /*
      * if (mappingOutputs.length==1) { mappingOutputs[0].addRowListener(rowListener); } else { // Find the main data
      * path... //
-     * 
-     * 
+     *
+     *
      * }
      */
 

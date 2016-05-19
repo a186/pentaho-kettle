@@ -30,8 +30,8 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 
-import org.apache.commons.vfs.FileObject;
-import org.apache.commons.vfs.FileType;
+import org.apache.commons.vfs2.FileObject;
+import org.apache.commons.vfs2.FileType;
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.exception.KettleException;
 import org.pentaho.di.core.logging.LogChannelInterface;
@@ -64,7 +64,7 @@ public class GPG {
    * Reads an output stream from an external process. Implemented as a thread.
    */
   class ProcessStreamReader extends Thread {
-    StringBuffer stream;
+    StringBuilder stream;
     InputStreamReader in;
 
     static final int BUFFER_SIZE = 1024;
@@ -79,7 +79,7 @@ public class GPG {
 
       this.in = new InputStreamReader( in );
 
-      this.stream = new StringBuffer();
+      this.stream = new StringBuilder();
     }
 
     public void run() {

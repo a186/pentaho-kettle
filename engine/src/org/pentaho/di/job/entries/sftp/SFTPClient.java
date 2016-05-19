@@ -2,7 +2,7 @@
  *
  * Pentaho Data Integration
  *
- * Copyright (C) 2002-2013 by Pentaho : http://www.pentaho.com
+ * Copyright (C) 2002-2016 by Pentaho : http://www.pentaho.com
  *
  *******************************************************************************
  *
@@ -24,11 +24,13 @@ package org.pentaho.di.job.entries.sftp;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.InetAddress;
 
-import org.apache.commons.vfs.FileObject;
-import org.apache.commons.vfs.FileType;
-import org.apache.commons.vfs.FileUtil;
+import com.google.common.annotations.VisibleForTesting;
+import org.apache.commons.vfs2.FileObject;
+import org.apache.commons.vfs2.FileType;
+import org.apache.commons.vfs2.FileUtil;
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.exception.KettleFileException;
 import org.pentaho.di.core.exception.KettleJobException;
@@ -56,6 +58,14 @@ public class SFTPClient {
   public static final String HTTP_DEFAULT_PORT = "80";
   public static final String SOCKS5_DEFAULT_PORT = "1080";
   public static final int SSH_DEFAULT_PORT = 22;
+
+  // -D parameter telling whether we should use GSSAPI authentication or not
+  static final String ENV_PARAM_USERAUTH_GSSAPI = "userauth.gssapi.enabled";
+
+  private static final String PREFERRED_AUTH_CONFIG_NAME = "PreferredAuthentications";
+  private static final String PREFERRED_AUTH_DEFAULT = "publickey,keyboard-interactive,password";
+  // adding GSSAPI to be the last one
+  private static final String PREFERRED_AUTH_WITH_GSSAPI = PREFERRED_AUTH_DEFAULT + ",gssapi-with-mic";
 
   private InetAddress serverIP;
   private int serverPort;
@@ -127,7 +137,7 @@ public class SFTPClient {
     this.serverPort = serverPort;
     this.userName = userName;
 
-    JSch jsch = new JSch();
+    JSch jsch = createJSch();
     try {
       if ( !Const.isEmpty( privateKeyFilename ) ) {
         // We need to use private key authentication
@@ -140,9 +150,10 @@ public class SFTPClient {
         }
         jsch.addIdentity( getUserName(), FileUtil.getContent( KettleVFS.getFileObject( prvkey ) ), // byte[] privateKey
           null, // byte[] publicKey
-          passphrasebytes ); // byte[] passPhrase          
+          passphrasebytes ); // byte[] passPhrase
       }
       s = jsch.getSession( userName, serverIP.getHostAddress(), serverPort );
+      s.setConfig( PREFERRED_AUTH_CONFIG_NAME, getPreferredAuthentications() );
     } catch ( IOException e ) {
       throw new KettleJobException( e );
     } catch ( KettleFileException e ) {
@@ -212,6 +223,27 @@ public class SFTPClient {
     return fileList;
   }
 
+  public void get( FileObject localFile, String remoteFile ) throws KettleJobException {
+    OutputStream localStream = null;
+    try {
+      localStream = KettleVFS.getOutputStream( localFile, false );
+      c.get( remoteFile, localStream );
+    } catch ( SftpException e ) {
+      throw new KettleJobException( e );
+    } catch ( IOException e ) {
+      throw new KettleJobException( e );
+    } finally {
+      if ( localStream != null ) {
+        try {
+          localStream.close();
+        } catch ( IOException ignore ) {
+          // Ignore any IOException, as we're trying to close the stream anyways
+        }
+      }
+    }
+  }
+
+  @Deprecated
   public void get( String localFilePath, String remoteFile ) throws KettleJobException {
     int mode = ChannelSftp.OVERWRITE;
     try {
@@ -359,8 +391,12 @@ public class SFTPClient {
   }
 
   public void disconnect() {
-    c.disconnect();
-    s.disconnect();
+    if ( c != null ) {
+      c.disconnect();
+    }
+    if ( s != null ) {
+      s.disconnect();
+    }
   }
 
   public String GetPrivateKeyFileName() {
@@ -399,5 +435,18 @@ public class SFTPClient {
       return null;
     }
     return this.compression;
+  }
+
+  @VisibleForTesting
+  JSch createJSch() {
+    return new JSch();
+  }
+
+  /**
+   * Whether we should use GSSAPI when authenticating or not.
+   */
+  private String getPreferredAuthentications() {
+    String param = Const.getEnvironmentVariable( ENV_PARAM_USERAUTH_GSSAPI, null );
+    return Boolean.valueOf( param ) ? PREFERRED_AUTH_WITH_GSSAPI : PREFERRED_AUTH_DEFAULT;
   }
 }

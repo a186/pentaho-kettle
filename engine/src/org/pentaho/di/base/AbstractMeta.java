@@ -2,7 +2,7 @@
  *
  * Pentaho Data Integration
  *
- * Copyright (C) 2002-2013 by Pentaho : http://www.pentaho.com
+ * Copyright (C) 2002-2016 by Pentaho : http://www.pentaho.com
  *
  *******************************************************************************
  *
@@ -22,12 +22,7 @@
 
 package org.pentaho.di.base;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import com.google.common.collect.ImmutableList;
 
 import org.pentaho.di.cluster.SlaveServer;
 import org.pentaho.di.core.AttributesInterface;
@@ -35,8 +30,13 @@ import org.pentaho.di.core.Const;
 import org.pentaho.di.core.EngineMetaInterface;
 import org.pentaho.di.core.NotePadMeta;
 import org.pentaho.di.core.Props;
+import org.pentaho.di.core.attributes.metastore.EmbeddedMetaStore;
 import org.pentaho.di.core.changed.ChangedFlag;
+import org.pentaho.di.core.changed.ChangedFlagInterface;
+import org.pentaho.di.core.changed.PDIObserver;
 import org.pentaho.di.core.database.DatabaseMeta;
+import org.pentaho.di.core.exception.KettleException;
+import org.pentaho.di.core.exception.KettlePluginException;
 import org.pentaho.di.core.exception.KettleValueException;
 import org.pentaho.di.core.gui.OverwritePrompter;
 import org.pentaho.di.core.gui.Point;
@@ -46,6 +46,7 @@ import org.pentaho.di.core.listeners.FilenameChangedListener;
 import org.pentaho.di.core.listeners.NameChangedListener;
 import org.pentaho.di.core.logging.ChannelLogTable;
 import org.pentaho.di.core.logging.DefaultLogLevel;
+import org.pentaho.di.core.logging.LogChannel;
 import org.pentaho.di.core.logging.LogLevel;
 import org.pentaho.di.core.logging.LoggingObjectInterface;
 import org.pentaho.di.core.parameters.DuplicateParamException;
@@ -53,10 +54,11 @@ import org.pentaho.di.core.parameters.NamedParams;
 import org.pentaho.di.core.parameters.NamedParamsDefault;
 import org.pentaho.di.core.parameters.UnknownParamException;
 import org.pentaho.di.core.row.RowMetaInterface;
-import org.pentaho.di.core.row.ValueMeta;
+import org.pentaho.di.core.row.value.ValueMetaString;
 import org.pentaho.di.core.undo.TransAction;
 import org.pentaho.di.core.variables.VariableSpace;
 import org.pentaho.di.core.variables.Variables;
+import org.pentaho.di.metastore.DatabaseMetaStoreUtil;
 import org.pentaho.di.repository.HasRepositoryInterface;
 import org.pentaho.di.repository.ObjectId;
 import org.pentaho.di.repository.ObjectRevision;
@@ -67,21 +69,41 @@ import org.pentaho.di.shared.SharedObjects;
 import org.pentaho.di.trans.HasDatabasesInterface;
 import org.pentaho.di.trans.HasSlaveServersInterface;
 import org.pentaho.metastore.api.IMetaStore;
+import org.pentaho.metastore.api.IMetaStoreElement;
+import org.pentaho.metastore.api.IMetaStoreElementType;
+import org.pentaho.metastore.api.exceptions.MetaStoreException;
+import org.pentaho.metastore.util.PentahoDefaults;
 
-public abstract class AbstractMeta extends ChangedFlag implements UndoInterface, HasDatabasesInterface, VariableSpace,
-    EngineMetaInterface, NamedParams, HasSlaveServersInterface, AttributesInterface, HasRepositoryInterface,
-    LoggingObjectInterface {
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
-  /** Constant = 1 **/
+public abstract class AbstractMeta implements ChangedFlagInterface, UndoInterface, HasDatabasesInterface, VariableSpace,
+  EngineMetaInterface, NamedParams, HasSlaveServersInterface, AttributesInterface, HasRepositoryInterface,
+  LoggingObjectInterface {
+
+  /**
+   * Constant = 1
+   **/
   public static final int TYPE_UNDO_CHANGE = 1;
 
-  /** Constant = 2 **/
+  /**
+   * Constant = 2
+   **/
   public static final int TYPE_UNDO_NEW = 2;
 
-  /** Constant = 3 **/
+  /**
+   * Constant = 3
+   **/
   public static final int TYPE_UNDO_DELETE = 3;
 
-  /** Constant = 4 **/
+  /**
+   * Constant = 4
+   **/
   public static final int TYPE_UNDO_POSITION = 4;
 
   protected ObjectId objectId;
@@ -100,7 +122,9 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   protected RepositoryDirectoryInterface directory;
 
-  /** The repository to reference in the one-off case that it is needed */
+  /**
+   * The repository to reference in the one-off case that it is needed
+   */
   protected Repository repository;
 
   protected List<DatabaseMeta> databases;
@@ -123,6 +147,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   protected Map<String, Map<String, String>> attributesMap;
 
+  protected EmbeddedMetaStore embeddedMetaStore = new EmbeddedMetaStore( this );
+
   protected VariableSpace variables = new Variables();
 
   protected NamedParams namedParams = new NamedParamsDefault();
@@ -140,12 +166,46 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
    */
   protected String sharedObjectsFile;
 
-  /** The last loaded version of the shared objects */
+  /**
+   * The last loaded version of the shared objects
+   */
   protected SharedObjects sharedObjects;
+
+  protected final ChangedFlag changedFlag = new ChangedFlag();
 
   protected int max_undo;
 
   protected int undo_position;
+
+  private boolean showDialog = true;
+  private boolean alwaysShowRunOptions = true;
+
+  public boolean isShowDialog() {
+    return showDialog;
+  }
+
+  public void setShowDialog( boolean showDialog ) {
+    this.showDialog = showDialog;
+  }
+
+  public boolean isAlwaysShowRunOptions() {
+    return alwaysShowRunOptions;
+  }
+
+  public void setAlwaysShowRunOptions( boolean alwaysShowRunOptions ) {
+    this.alwaysShowRunOptions = alwaysShowRunOptions;
+  }
+
+  /**
+   * The set of names of databases available only for this meta. The list is needed to distinguish connections when we
+   * load/save the meta in JCR repository.
+   * <p/>
+   * Should be {@code null} if we use old meta
+   *
+   * @see <a href="http://jira.pentaho.com/browse/PPP-3405">PPP-3405</a>,
+   * <a href="http://jira.pentaho.com/browse/PPP-3413">PPP-3413</a>
+   **/
+  protected Set<String> privateDatabases;
 
   /*
    * (non-Javadoc)
@@ -169,7 +229,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Gets the container object id.
-   * 
+   *
    * @return the carteObjectId
    */
   @Override
@@ -179,9 +239,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Sets the carte object id.
-   * 
-   * @param containerObjectId
-   *          the execution container Object id to set
+   *
+   * @param containerObjectId the execution container Object id to set
    */
   public void setCarteObjectId( String containerObjectId ) {
     this.containerObjectId = containerObjectId;
@@ -189,7 +248,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Get the name of the transformation.
-   * 
+   *
    * @return The name of the transformation
    */
   @Override
@@ -199,9 +258,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Set the name.
-   * 
-   * @param newName
-   *          The new name
+   *
+   * @param newName The new name
    */
   @Override
   public void setName( String newName ) {
@@ -212,7 +270,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Gets the description of the job.
-   * 
+   *
    * @return The description of the job
    */
   @Override
@@ -222,9 +280,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Set the description of the job.
-   * 
-   * @param description
-   *          The new description of the job
+   *
+   * @param description The new description of the job
    */
   @Override
   public void setDescription( String description ) {
@@ -233,7 +290,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Gets the extended description of the job.
-   * 
+   *
    * @return The extended description of the job
    */
   public String getExtendedDescription() {
@@ -242,9 +299,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Set the description of the job.
-   * 
-   * @param extendedDescription
-   *          The new extended description of the job
+   *
+   * @param extendedDescription The new extended description of the job
    */
   public void setExtendedDescription( String extendedDescription ) {
     this.extendedDescription = extendedDescription;
@@ -262,7 +318,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Gets the filename.
-   * 
+   *
    * @return filename
    * @see org.pentaho.di.core.EngineMetaInterface#getFilename()
    */
@@ -273,9 +329,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Set the filename of the job
-   * 
-   * @param newFilename
-   *          The new filename of the job
+   *
+   * @param newFilename The new filename of the job
    */
   @Override
   public void setFilename( String newFilename ) {
@@ -286,7 +341,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Gets the directory.
-   * 
+   *
    * @return Returns the directory.
    */
   @Override
@@ -296,9 +351,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Sets the directory.
-   * 
-   * @param directory
-   *          The directory to set.
+   *
+   * @param directory The directory to set.
    */
   @Override
   public void setRepositoryDirectory( RepositoryDirectoryInterface directory ) {
@@ -308,7 +362,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Gets the repository.
-   * 
+   *
    * @return the repository
    */
   @Override
@@ -318,9 +372,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Sets the repository.
-   * 
-   * @param repository
-   *          the repository to set
+   *
+   * @param repository the repository to set
    */
   @Override
   public void setRepository( Repository repository ) {
@@ -342,17 +395,15 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Sets the internal filename kettle variables.
-   * 
-   * @param var
-   *          the new internal filename kettle variables
+   *
+   * @param var the new internal filename kettle variables
    */
   protected abstract void setInternalFilenameKettleVariables( VariableSpace var );
 
   /**
    * Find a database connection by it's name
-   * 
-   * @param name
-   *          The database name to look for
+   *
+   * @param name The database name to look for
    * @return The database connection or null if nothing was found.
    */
   @Override
@@ -360,7 +411,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
     for ( int i = 0; i < nrDatabases(); i++ ) {
       DatabaseMeta ci = getDatabase( i );
       if ( ( ci != null ) && ( ci.getName().equalsIgnoreCase( name ) )
-          || ( ci.getDisplayName().equalsIgnoreCase( name ) ) ) {
+        || ( ci.getDisplayName().equalsIgnoreCase( name ) ) ) {
         return ci;
       }
     }
@@ -369,17 +420,17 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.trans.HasDatabasesInterface#nrDatabases()
    */
   @Override
   public int nrDatabases() {
-    return databases.size();
+    return ( databases == null ? 0 : databases.size() );
   }
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.trans.HasDatabasesInterface#getDatabase(int)
    */
   @Override
@@ -387,24 +438,43 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
     return databases.get( i );
   }
 
+  public void importFromMetaStore() throws MetaStoreException, KettlePluginException {
+    // Read the databases...
+    //
+    if ( metaStore != null ) {
+      IMetaStoreElementType databaseType =
+        metaStore.getElementTypeByName(
+          PentahoDefaults.NAMESPACE, PentahoDefaults.DATABASE_CONNECTION_ELEMENT_TYPE_NAME );
+      if ( databaseType != null ) {
+        List<IMetaStoreElement> databaseElements = metaStore.getElements( PentahoDefaults.NAMESPACE, databaseType );
+        for ( IMetaStoreElement databaseElement : databaseElements ) {
+          addDatabase( DatabaseMetaStoreUtil.loadDatabaseMetaFromDatabaseElement(
+            metaStore, databaseElement ), false );
+        }
+      }
+
+      // TODO: do the same for slaves, clusters, partition schemas
+    }
+  }
+
   /**
    * Adds the name changed listener.
-   * 
-   * @param listener
-   *          the listener
+   *
+   * @param listener the listener
    */
   public void addNameChangedListener( NameChangedListener listener ) {
     if ( nameChangedListeners == null ) {
       nameChangedListeners = new ArrayList<NameChangedListener>();
     }
-    nameChangedListeners.add( listener );
+    if ( listener != null ) {
+      nameChangedListeners.add( listener );
+    }
   }
 
   /**
    * Removes the name changed listener.
-   * 
-   * @param listener
-   *          the listener
+   *
+   * @param listener the listener
    */
   public void removeNameChangedListener( NameChangedListener listener ) {
     nameChangedListeners.remove( listener );
@@ -412,11 +482,9 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Fire name changed listeners.
-   * 
-   * @param oldName
-   *          the old name
-   * @param newName
-   *          the new name
+   *
+   * @param oldName the old name
+   * @param newName the new name
    */
   protected void fireNameChangedListeners( String oldName, String newName ) {
     if ( nameChanged( oldName, newName ) ) {
@@ -430,22 +498,22 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Adds the filename changed listener.
-   * 
-   * @param listener
-   *          the listener
+   *
+   * @param listener the listener
    */
   public void addFilenameChangedListener( FilenameChangedListener listener ) {
     if ( filenameChangedListeners == null ) {
       filenameChangedListeners = new ArrayList<FilenameChangedListener>();
     }
-    filenameChangedListeners.add( listener );
+    if ( listener != null ) {
+      filenameChangedListeners.add( listener );
+    }
   }
 
   /**
    * Removes the filename changed listener.
-   * 
-   * @param listener
-   *          the listener
+   *
+   * @param listener the listener
    */
   public void removeFilenameChangedListener( FilenameChangedListener listener ) {
     filenameChangedListeners.remove( listener );
@@ -453,11 +521,9 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Fire filename changed listeners.
-   * 
-   * @param oldFilename
-   *          the old filename
-   * @param newFilename
-   *          the new filename
+   *
+   * @param oldFilename the old filename
+   * @param newFilename the new filename
    */
   protected void fireFilenameChangedListeners( String oldFilename, String newFilename ) {
     if ( nameChanged( oldFilename, newFilename ) ) {
@@ -471,7 +537,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Adds the passed ContentChangedListener to the list of listeners.
-   * 
+   *
    * @param listener
    */
   public void addContentChangedListener( ContentChangedListener listener ) {
@@ -483,11 +549,19 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Removes the passed ContentChangedListener from the list of listeners.
-   * 
+   *
    * @param listener
    */
   public void removeContentChangedListener( ContentChangedListener listener ) {
     contentChangedListeners.remove( listener );
+  }
+
+  public List<ContentChangedListener> getContentChangedListeners() {
+    if ( contentChangedListeners == null ) {
+      return ImmutableList.of();
+    } else {
+      return ImmutableList.copyOf( contentChangedListeners );
+    }
   }
 
   /**
@@ -513,9 +587,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Add a new slave server to the transformation if that didn't exist yet. Otherwise, replace it.
-   * 
-   * @param slaveServer
-   *          The slave server to be added.
+   *
+   * @param slaveServer The slave server to be added.
    */
   public void addOrReplaceSlaveServer( SlaveServer slaveServer ) {
     int index = slaveServers.indexOf( slaveServer );
@@ -530,7 +603,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Gets a list of slave servers.
-   * 
+   *
    * @return the slaveServer list
    */
   @Override
@@ -540,9 +613,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Sets the slave servers.
-   * 
-   * @param slaveServers
-   *          the slaveServers to set
+   *
+   * @param slaveServers the slaveServers to set
    */
   public void setSlaveServers( List<SlaveServer> slaveServers ) {
     this.slaveServers = slaveServers;
@@ -550,9 +622,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Find a slave server using the name
-   * 
-   * @param serverString
-   *          the name of the slave server
+   *
+   * @param serverString the name of the slave server
    * @return the slave server or null if we couldn't spot an approriate entry.
    */
   public SlaveServer findSlaveServer( String serverString ) {
@@ -561,7 +632,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Gets an array of slave server names.
-   * 
+   *
    * @return An array list slave server names
    */
   public String[] getSlaveServerNames() {
@@ -570,13 +641,13 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.gui.UndoInterface#addUndo(java.lang.Object[], java.lang.Object[], int[],
    * org.pentaho.di.core.gui.Point[], org.pentaho.di.core.gui.Point[], int, boolean)
    */
   @Override
   public void addUndo( Object[] from, Object[] to, int[] pos, Point[] prev, Point[] curr, int type_of_change,
-      boolean nextAlso ) {
+                       boolean nextAlso ) {
     // First clean up after the current position.
     // Example: position at 3, size=5
     // 012345
@@ -626,7 +697,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.gui.UndoInterface#nextUndo()
    */
   @Override
@@ -645,7 +716,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.gui.UndoInterface#viewNextUndo()
    */
   @Override
@@ -663,7 +734,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
   // get previous undo, change position
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.gui.UndoInterface#previousUndo()
    */
   @Override
@@ -681,7 +752,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * View current undo, don't change undo position
-   * 
+   *
    * @return The current undo transaction
    */
   @Override
@@ -698,7 +769,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
   // View previous undo, don't change position
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.gui.UndoInterface#viewPreviousUndo()
    */
   @Override
@@ -714,7 +785,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.gui.UndoInterface#getMaxUndo()
    */
   @Override
@@ -724,7 +795,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.gui.UndoInterface#setMaxUndo(int)
    */
   @Override
@@ -737,7 +808,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Gets the undo size.
-   * 
+   *
    * @return the undo size
    */
   public int getUndoSize() {
@@ -745,6 +816,10 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
       return 0;
     }
     return undo.size();
+  }
+
+  public EmbeddedMetaStore getEmbeddedMetaStore() {
+    return embeddedMetaStore;
   }
 
   @Override
@@ -788,11 +863,9 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Add a new note at a certain location (i.e. the specified index). Also marks that the notes have changed.
-   * 
-   * @param p
-   *          The index into the notes list
-   * @param ni
-   *          The note to be added.
+   *
+   * @param p  The index into the notes list
+   * @param ni The note to be added.
    */
   public void addNote( int p, NotePadMeta ni ) {
     notes.add( p, ni );
@@ -801,9 +874,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Add a new note. Also marks that the notes have changed.
-   * 
-   * @param ni
-   *          The note to be added.
+   *
+   * @param ni The note to be added.
    */
   public void addNote( NotePadMeta ni ) {
     notes.add( ni );
@@ -813,10 +885,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
   /**
    * Find the note that is located on a certain point on the canvas.
    *
-   * @param x
-   *          the x-coordinate of the point queried
-   * @param y
-   *          the y-coordinate of the point queried
+   * @param x the x-coordinate of the point queried
+   * @param y the y-coordinate of the point queried
    * @return The note information if a note is located at the point. Otherwise, if nothing was found: null.
    */
   public NotePadMeta getNote( int x, int y ) {
@@ -829,7 +899,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
       Point loc = ni.getLocation();
       Point p = new Point( loc.x, loc.y );
       if ( x >= p.x && x <= p.x + ni.width + 2 * Const.NOTE_MARGIN && y >= p.y
-          && y <= p.y + ni.height + 2 * Const.NOTE_MARGIN ) {
+        && y <= p.y + ni.height + 2 * Const.NOTE_MARGIN ) {
         return ni;
       }
     }
@@ -838,9 +908,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Gets the note.
-   * 
-   * @param i
-   *          the i
+   *
+   * @param i the i
    * @return the note
    */
   public NotePadMeta getNote( int i ) {
@@ -849,7 +918,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Gets the notes.
-   * 
+   *
    * @return the notes
    */
   public List<NotePadMeta> getNotes() {
@@ -858,7 +927,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Gets a list of all selected notes.
-   * 
+   *
    * @return A list of all the selected notes.
    */
   public List<NotePadMeta> getSelectedNotes() {
@@ -874,8 +943,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
   /**
    * Finds the location (index) of the specified note.
    *
-   * @param ni
-   *          The note queried
+   * @param ni The note queried
    * @return The location of the note, or -1 if nothing was found.
    */
   public int indexOfNote( NotePadMeta ni ) {
@@ -885,9 +953,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
   /**
    * Lowers a note to the "bottom" of the list by removing the note at the specified index and re-inserting it at the
    * front. Also marks that the notes have changed.
-   * 
-   * @param p
-   *          the index into the notes list.
+   *
+   * @param p the index into the notes list.
    */
   public void lowerNote( int p ) {
     // if valid index and not first index
@@ -910,9 +977,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
   /**
    * Raises a note to the "top" of the list by removing the note at the specified index and re-inserting it at the end.
    * Also marks that the notes have changed.
-   * 
-   * @param p
-   *          the index into the notes list.
+   *
+   * @param p the index into the notes list.
    */
   public void raiseNote( int p ) {
     // if valid index and not last index
@@ -925,9 +991,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Removes a note at a certain location (i.e. the specified index). Also marks that the notes have changed.
-   * 
-   * @param i
-   *          The index into the notes list
+   *
+   * @param i The index into the notes list
    */
   public void removeNote( int i ) {
     if ( i < 0 || i >= notes.size() ) {
@@ -939,7 +1004,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Checks whether or not any of the notes have been changed.
-   * 
+   *
    * @return true if the notes have been changed, false otherwise
    */
   public boolean haveNotesChanged() {
@@ -958,9 +1023,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Get an array of the locations of an array of notes
-   * 
-   * @param notes
-   *          An array of notes
+   *
+   * @param notes An array of notes
    * @return an array of the locations of an array of notes
    */
   public int[] getNoteIndexes( List<NotePadMeta> notes ) {
@@ -975,7 +1039,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Gets the channel log table for the job.
-   * 
+   *
    * @return the channel log table for the job.
    */
   public ChannelLogTable getChannelLogTable() {
@@ -984,15 +1048,19 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.trans.HasDatabaseInterface#addOrReplaceDatabase(org.pentaho.di.core.database.DatabaseMeta)
    */
   @Override
   public void addOrReplaceDatabase( DatabaseMeta databaseMeta ) {
+    addDatabase( databaseMeta, true );
+  }
+
+  protected void addDatabase( DatabaseMeta databaseMeta, boolean replace ) {
     int index = databases.indexOf( databaseMeta );
     if ( index < 0 ) {
       addDatabase( databaseMeta );
-    } else {
+    } else if ( replace ) {
       DatabaseMeta previous = getDatabase( index );
       previous.replaceMeta( databaseMeta );
     }
@@ -1001,7 +1069,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.trans.HasDatabasesInterface#addDatabase(org.pentaho.di.core.database.DatabaseMeta)
    */
   @Override
@@ -1013,7 +1081,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.trans.HasDatabasesInterface#addDatabase(int, org.pentaho.di.core.database.DatabaseMeta)
    */
   @Override
@@ -1024,7 +1092,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Returns a list of the databases.
-   * 
+   *
    * @return Returns the databases.
    */
   @Override
@@ -1034,7 +1102,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Gets the database names.
-   * 
+   *
    * @return the database names
    */
   public String[] getDatabaseNames() {
@@ -1047,7 +1115,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.trans.HasDatabasesInterface#indexOfDatabase(org.pentaho.di.core.database.DatabaseMeta)
    */
   @Override
@@ -1057,9 +1125,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Sets the databases.
-   * 
-   * @param databases
-   *          The databases to set.
+   *
+   * @param databases The databases to set.
    */
   @Override
   public void setDatabases( List<DatabaseMeta> databases ) {
@@ -1069,7 +1136,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.trans.HasDatabasesInterface#haveConnectionsChanged()
    */
   @Override
@@ -1089,7 +1156,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.trans.HasDatabasesInterface#removeDatabase(int)
    */
   @Override
@@ -1103,7 +1170,6 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Clears the flags for whether the transformation's databases have changed.
-   *
    */
   public void clearChangedDatabases() {
     changedDatabases = false;
@@ -1115,9 +1181,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Sets the channel log table for the job.
-   * 
-   * @param channelLogTable
-   *          the channelLogTable to set
+   *
+   * @param channelLogTable the channelLogTable to set
    */
   public void setChannelLogTable( ChannelLogTable channelLogTable ) {
     this.channelLogTable = channelLogTable;
@@ -1125,7 +1190,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.variables.VariableSpace#copyVariablesFrom(org.pentaho.di.core.variables.VariableSpace)
    */
 
@@ -1136,7 +1201,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.variables.VariableSpace#environmentSubstitute(java.lang.String)
    */
   @Override
@@ -1146,7 +1211,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.variables.VariableSpace#environmentSubstitute(java.lang.String[])
    */
   @Override
@@ -1161,7 +1226,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.variables.VariableSpace#getParentVariableSpace()
    */
   @Override
@@ -1171,7 +1236,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see
    * org.pentaho.di.core.variables.VariableSpace#setParentVariableSpace(org.pentaho.di.core.variables.VariableSpace)
    */
@@ -1182,7 +1247,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.variables.VariableSpace#getVariable(java.lang.String, java.lang.String)
    */
   @Override
@@ -1192,7 +1257,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.variables.VariableSpace#getVariable(java.lang.String)
    */
   @Override
@@ -1202,7 +1267,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.variables.VariableSpace#getBooleanValueOfVariable(java.lang.String, boolean)
    */
   @Override
@@ -1210,7 +1275,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
     if ( !Const.isEmpty( variableName ) ) {
       String value = environmentSubstitute( variableName );
       if ( !Const.isEmpty( value ) ) {
-        return ValueMeta.convertStringToBoolean( value );
+        return ValueMetaString.convertStringToBoolean( value );
       }
     }
     return defaultValue;
@@ -1218,7 +1283,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see
    * org.pentaho.di.core.variables.VariableSpace#initializeVariablesFrom(org.pentaho.di.core.variables.VariableSpace)
    */
@@ -1229,7 +1294,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.variables.VariableSpace#listVariables()
    */
   @Override
@@ -1239,7 +1304,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.variables.VariableSpace#setVariable(java.lang.String, java.lang.String)
    */
   @Override
@@ -1249,7 +1314,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.variables.VariableSpace#shareVariablesWith(org.pentaho.di.core.variables.VariableSpace)
    */
   @Override
@@ -1259,7 +1324,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.variables.VariableSpace#injectVariables(java.util.Map)
    */
   @Override
@@ -1269,7 +1334,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.parameters.NamedParams#addParameterDefinition(java.lang.String, java.lang.String,
    * java.lang.String)
    */
@@ -1280,7 +1345,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.parameters.NamedParams#getParameterDescription(java.lang.String)
    */
   @Override
@@ -1290,7 +1355,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.parameters.NamedParams#getParameterDefault(java.lang.String)
    */
   @Override
@@ -1300,7 +1365,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.parameters.NamedParams#getParameterValue(java.lang.String)
    */
   @Override
@@ -1310,7 +1375,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.parameters.NamedParams#listParameters()
    */
   @Override
@@ -1320,7 +1385,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.parameters.NamedParams#setParameterValue(java.lang.String, java.lang.String)
    */
   @Override
@@ -1330,7 +1395,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.parameters.NamedParams#eraseParameters()
    */
   @Override
@@ -1340,7 +1405,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.parameters.NamedParams#clearParameters()
    */
   @Override
@@ -1350,7 +1415,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.parameters.NamedParams#copyParametersFrom(org.pentaho.di.core.parameters.NamedParams)
    */
   @Override
@@ -1360,7 +1425,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.parameters.NamedParams#activateParameters()
    */
   @Override
@@ -1391,7 +1456,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /*
    * (non-Javadoc)
-   * 
+   *
    * @see org.pentaho.di.core.logging.LoggingObjectInterface#getLogLevel()
    */
   @Override
@@ -1401,9 +1466,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Sets the log level.
-   * 
-   * @param logLevel
-   *          the new log level
+   *
+   * @param logLevel the new log level
    */
   public void setLogLevel( LogLevel logLevel ) {
     this.logLevel = logLevel;
@@ -1419,7 +1483,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Gets the shared objects file.
-   * 
+   *
    * @return the sharedObjectsFile
    */
   public String getSharedObjectsFile() {
@@ -1428,9 +1492,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Sets the shared objects file.
-   * 
-   * @param sharedObjectsFile
-   *          the sharedObjectsFile to set
+   *
+   * @param sharedObjectsFile the sharedObjectsFile to set
    */
   public void setSharedObjectsFile( String sharedObjectsFile ) {
     this.sharedObjectsFile = sharedObjectsFile;
@@ -1438,18 +1501,25 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Gets the shared objects.
-   * 
+   *
    * @return the sharedObjects
    */
   public SharedObjects getSharedObjects() {
+    if ( sharedObjects == null ) {
+      try {
+        String soFile = environmentSubstitute( sharedObjectsFile );
+        sharedObjects = new SharedObjects( soFile );
+      } catch ( KettleException e ) {
+        LogChannel.GENERAL.logDebug( e.getMessage(), e );
+      }
+    }
     return sharedObjects;
   }
 
   /**
    * Sets the shared objects.
-   * 
-   * @param sharedObjects
-   *          the sharedObjects to set
+   *
+   * @param sharedObjects the sharedObjects to set
    */
   public void setSharedObjects( SharedObjects sharedObjects ) {
     this.sharedObjects = sharedObjects;
@@ -1457,15 +1527,14 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Sets the internal name kettle variable.
-   * 
-   * @param var
-   *          the new internal name kettle variable
+   *
+   * @param var the new internal name kettle variable
    */
   protected abstract void setInternalNameKettleVariable( VariableSpace var );
 
   /**
    * Gets the date the transformation was created.
-   * 
+   *
    * @return the date the transformation was created.
    */
   @Override
@@ -1475,9 +1544,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Sets the date the transformation was created.
-   * 
-   * @param createdDate
-   *          The creation date to set.
+   *
+   * @param createdDate The creation date to set.
    */
   @Override
   public void setCreatedDate( Date createdDate ) {
@@ -1486,9 +1554,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Sets the user by whom the transformation was created.
-   * 
-   * @param createdUser
-   *          The user to set.
+   *
+   * @param createdUser The user to set.
    */
   @Override
   public void setCreatedUser( String createdUser ) {
@@ -1497,7 +1564,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Gets the user by whom the transformation was created.
-   * 
+   *
    * @return the user by whom the transformation was created.
    */
   @Override
@@ -1507,9 +1574,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Sets the date the transformation was modified.
-   * 
-   * @param modifiedDate
-   *          The modified date to set.
+   *
+   * @param modifiedDate The modified date to set.
    */
   @Override
   public void setModifiedDate( Date modifiedDate ) {
@@ -1518,7 +1584,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Gets the date the transformation was modified.
-   * 
+   *
    * @return the date the transformation was modified.
    */
   @Override
@@ -1528,9 +1594,8 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Sets the user who last modified the transformation.
-   * 
-   * @param modifiedUser
-   *          The user name to set.
+   *
+   * @param modifiedUser The user name to set.
    */
   @Override
   public void setModifiedUser( String modifiedUser ) {
@@ -1539,7 +1604,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Gets the user who last modified the transformation.
-   * 
+   *
    * @return the user who last modified the transformation.
    */
   @Override
@@ -1578,22 +1643,40 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
     for ( int i = 0; i < nrNotes(); i++ ) {
       getNote( i ).setChanged( false );
     }
-    super.clearChanged();
+    changedFlag.clearChanged();
+    fireContentChangedListeners( false );
+  }
+
+  @Override
+  public void setChanged() {
+    changedFlag.setChanged();
+    fireContentChangedListeners( true );
   }
 
   /*
-   * (non-Javadoc)
-   *
-   * @see org.pentaho.di.core.changed.ChangedFlag#setChanged(boolean)
-   */
+     * (non-Javadoc)
+     *
+     * @see org.pentaho.di.core.changed.ChangedFlag#setChanged(boolean)
+     */
   @Override
-  public void setChanged( boolean ch ) {
+  public final void setChanged( boolean ch ) {
     if ( ch ) {
       setChanged();
     } else {
       clearChanged();
     }
-    fireContentChangedListeners( ch );
+  }
+
+  public void addObserver( PDIObserver o ) {
+    changedFlag.addObserver( o );
+  }
+
+  public void deleteObserver( PDIObserver o ) {
+    changedFlag.deleteObserver( o );
+  }
+
+  public void notifyObservers( Object arg ) {
+    changedFlag.notifyObservers( arg );
   }
 
   /**
@@ -1609,7 +1692,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   @Override
   public boolean hasChanged() {
-    if ( super.hasChanged() ) {
+    if ( changedFlag.hasChanged() ) {
       return true;
     }
     if ( haveConnectionsChanged() ) {
@@ -1623,7 +1706,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Gets the registration date for the transformation. For AbstractMeta, this method always returns null.
-   * 
+   *
    * @return null
    */
   @Override
@@ -1633,7 +1716,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
 
   /**
    * Gets the interface to the parent log object. For AbstractMeta, this method always returns null.
-   * 
+   *
    * @return null
    * @see org.pentaho.di.core.logging.LoggingObjectInterface#getParent()
    */
@@ -1687,11 +1770,9 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
    * Checks whether the specified name has changed (i.e. is different from the specified old name). If both names are
    * null, false is returned. If the old name is null and the new new name is non-null, true is returned. Otherwise, if
    * the name strings are equal then true is returned; false is returned if the name strings are not equal.
-   * 
-   * @param oldName
-   *          the old name
-   * @param newName
-   *          the new name
+   *
+   * @param oldName the old name
+   * @param newName the new name
    * @return true if the names have changed, false otherwise
    */
   private boolean nameChanged( String oldName, String newName ) {
@@ -1701,7 +1782,7 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
     if ( oldName == null && newName != null ) {
       return true;
     }
-    return oldName.equals( newName );
+    return !oldName.equals( newName );
   }
 
   protected boolean shouldOverwrite( OverwritePrompter prompter, Props props, String message, String rememberMessage ) {
@@ -1713,5 +1794,28 @@ public abstract class AbstractMeta extends ChangedFlag implements UndoInterface,
       }
     }
     return overwrite;
+  }
+
+  public boolean hasMissingPlugins() {
+    return false;
+  }
+
+  /**
+   * Returns the set of databases available only for this meta or <b>null</b> if it was not initialized.
+   * Note, that the internal collection is returned with no protection wrapper!
+   *
+   * @return <b>nonSharableDatabases</b>
+   */
+  public Set<String> getPrivateDatabases() {
+    return privateDatabases;
+  }
+
+  /**
+   * Sets private databases' names
+   *
+   * @param privateDatabases - The list of databases available only for this meta
+   */
+  public void setPrivateDatabases( Set<String> privateDatabases ) {
+    this.privateDatabases = privateDatabases;
   }
 }

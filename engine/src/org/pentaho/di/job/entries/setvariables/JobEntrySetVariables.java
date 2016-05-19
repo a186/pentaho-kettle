@@ -22,15 +22,16 @@
 
 package org.pentaho.di.job.entries.setvariables;
 
-import static org.pentaho.di.job.entry.validator.AbstractFileValidator.putVariableSpace;
-import static org.pentaho.di.job.entry.validator.AndValidator.putValidators;
-import static org.pentaho.di.job.entry.validator.JobEntryValidatorUtils.andValidator;
-import static org.pentaho.di.job.entry.validator.JobEntryValidatorUtils.fileExistsValidator;
-import static org.pentaho.di.job.entry.validator.JobEntryValidatorUtils.notNullValidator;
+import org.pentaho.di.job.entry.validator.AbstractFileValidator;
+import org.pentaho.di.job.entry.validator.AndValidator;
+import org.pentaho.di.job.entry.validator.JobEntryValidatorUtils;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.BufferedReader;
 
 import org.pentaho.di.cluster.SlaveServer;
 import org.pentaho.di.core.CheckResultInterface;
@@ -101,13 +102,26 @@ public class JobEntrySetVariables extends JobEntryBase implements Cloneable, Job
     this( "" );
   }
 
+  public void allocate( int nrFields ) {
+    variableName = new String[nrFields];
+    variableValue = new String[nrFields];
+    variableType = new int[nrFields];
+  }
+
   public Object clone() {
     JobEntrySetVariables je = (JobEntrySetVariables) super.clone();
+    if ( variableName != null ) {
+      int nrFields = variableName.length;
+      je.allocate( nrFields );
+      System.arraycopy( variableName, 0, je.variableName, 0, nrFields );
+      System.arraycopy( variableValue, 0, je.variableValue, 0, nrFields );
+      System.arraycopy( variableType, 0, je.variableType, 0, nrFields );
+    }
     return je;
   }
 
   public String getXML() {
-    StringBuffer retval = new StringBuffer( 300 );
+    StringBuilder retval = new StringBuilder( 300 );
     retval.append( super.getXML() );
     retval.append( "      " ).append( XMLHandler.addTagValue( "replacevars", replaceVars ) );
 
@@ -143,9 +157,7 @@ public class JobEntrySetVariables extends JobEntryBase implements Cloneable, Job
       Node fields = XMLHandler.getSubNode( entrynode, "fields" );
       // How many field variableName?
       int nrFields = XMLHandler.countNodes( fields, "field" );
-      variableName = new String[nrFields];
-      variableValue = new String[nrFields];
-      variableType = new int[nrFields];
+      allocate( nrFields );
 
       // Read them all...
       for ( int i = 0; i < nrFields; i++ ) {
@@ -172,9 +184,7 @@ public class JobEntrySetVariables extends JobEntryBase implements Cloneable, Job
 
       // How many variableName?
       int argnr = rep.countNrJobEntryAttributes( id_jobentry, "variable_name" );
-      variableName = new String[argnr];
-      variableValue = new String[argnr];
-      variableType = new int[argnr];
+      allocate( argnr );
 
       // Read them all...
       for ( int a = 0; a < argnr; a++ ) {
@@ -224,7 +234,11 @@ public class JobEntrySetVariables extends JobEntryBase implements Cloneable, Job
       try {
         if ( !Const.isEmpty( realFilename ) ) {
           Properties properties = new Properties();
-          properties.load( KettleVFS.getInputStream( realFilename ) );
+          InputStream is = KettleVFS.getInputStream( realFilename );
+          // for UTF8 properties files
+          InputStreamReader isr = new InputStreamReader( is, "UTF-8" );
+          BufferedReader reader = new BufferedReader( isr );
+          properties.load( reader );
           for ( Object key : properties.keySet() ) {
             variables.add( (String) key );
             variableValues.add( (String) properties.get( key ) );
@@ -403,18 +417,19 @@ public class JobEntrySetVariables extends JobEntryBase implements Cloneable, Job
 
   public void check( List<CheckResultInterface> remarks, JobMeta jobMeta, VariableSpace space,
     Repository repository, IMetaStore metaStore ) {
-    boolean res = andValidator().validate( this, "variableName", remarks, putValidators( notNullValidator() ) );
+    boolean res = JobEntryValidatorUtils.andValidator().validate( this, "variableName", remarks,
+        AndValidator.putValidators( JobEntryValidatorUtils.notNullValidator() ) );
 
     if ( res == false ) {
       return;
     }
 
     ValidatorContext ctx = new ValidatorContext();
-    putVariableSpace( ctx, getVariables() );
-    putValidators( ctx, notNullValidator(), fileExistsValidator() );
+    AbstractFileValidator.putVariableSpace( ctx, getVariables() );
+    AndValidator.putValidators( ctx, JobEntryValidatorUtils.notNullValidator(), JobEntryValidatorUtils.fileExistsValidator() );
 
     for ( int i = 0; i < variableName.length; i++ ) {
-      andValidator().validate( this, "variableName[" + i + "]", remarks, ctx );
+      JobEntryValidatorUtils.andValidator().validate( this, "variableName[" + i + "]", remarks, ctx );
     }
   }
 

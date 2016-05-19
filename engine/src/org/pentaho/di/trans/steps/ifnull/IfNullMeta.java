@@ -2,7 +2,7 @@
  *
  * Pentaho Data Integration
  *
- * Copyright (C) 2002-2013 by Pentaho : http://www.pentaho.com
+ * Copyright (C) 2002-2016 by Pentaho : http://www.pentaho.com
  *
  *******************************************************************************
  *
@@ -143,19 +143,15 @@ public class IfNullMeta extends BaseStepMeta implements StepMetaInterface {
     int nrfields = fieldName.length;
     retval.allocate( nrTypes, nrfields );
 
-    for ( int i = 0; i < nrTypes; i++ ) {
-      retval.typeName[i] = typeName[i];
-      retval.typereplaceValue[i] = typereplaceValue[i];
-      retval.typereplaceMask[i] = typereplaceMask[i];
-      retval.setTypeEmptyString[i] = setTypeEmptyString[i];
-    }
+    System.arraycopy( typeName, 0, retval.typeName, 0, nrTypes );
+    System.arraycopy( typereplaceValue, 0, retval.typereplaceValue, 0, nrTypes );
+    System.arraycopy( typereplaceMask, 0, retval.typereplaceMask, 0, nrTypes );
+    System.arraycopy( setTypeEmptyString, 0, retval.setTypeEmptyString, 0, nrTypes );
 
-    for ( int i = 0; i < nrfields; i++ ) {
-      retval.fieldName[i] = fieldName[i];
-      retval.replaceValue[i] = replaceValue[i];
-      retval.replaceMask[i] = replaceMask[i];
-      retval.setEmptyString[i] = setEmptyString[i];
-    }
+    System.arraycopy( fieldName, 0, retval.fieldName, 0, nrfields );
+    System.arraycopy( replaceValue, 0, retval.replaceValue, 0, nrfields );
+    System.arraycopy( replaceMask, 0, retval.replaceMask, 0, nrfields );
+    System.arraycopy( setEmptyString, 0, retval.setEmptyString, 0, nrfields );
 
     return retval;
   }
@@ -332,7 +328,7 @@ public class IfNullMeta extends BaseStepMeta implements StepMetaInterface {
   }
 
   public String getXML() {
-    StringBuffer retval = new StringBuffer();
+    StringBuilder retval = new StringBuilder();
 
     retval.append( "      " + XMLHandler.addTagValue( "replaceAllByValue", replaceAllByValue ) );
     retval.append( "      " + XMLHandler.addTagValue( "replaceAllMask", replaceAllMask ) );
@@ -375,6 +371,12 @@ public class IfNullMeta extends BaseStepMeta implements StepMetaInterface {
     int nrfields = 0;
     int nrtypes = 0;
     allocate( nrtypes, nrfields );
+    /*
+     * Code will never execute. nrfields and nrtypes
+     * are both zero above. so for-next is skipped on both.
+     * 
+     * MB - 5/2016
+     * 
     for ( int i = 0; i < nrtypes; i++ ) {
       typeName[i] = "typename" + i;
       typereplaceValue[i] = "typevalue" + i;
@@ -387,6 +389,7 @@ public class IfNullMeta extends BaseStepMeta implements StepMetaInterface {
       replaceMask[i] = "mask" + i;
       setEmptyString[i] = false;
     }
+    */
   }
 
   public void readRep( Repository rep, IMetaStore metaStore, ObjectId id_step, List<DatabaseMeta> databases ) throws KettleException {

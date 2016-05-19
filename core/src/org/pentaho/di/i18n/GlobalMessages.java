@@ -32,6 +32,7 @@ import java.util.Map;
 import java.util.MissingResourceException;
 import java.util.PropertyResourceBundle;
 import java.util.ResourceBundle;
+import java.io.InputStreamReader;
 
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.exception.KettleException;
@@ -98,8 +99,7 @@ public class GlobalMessages extends AbstractMessageHandler {
 
   protected static String getLocaleString( Locale locale ) {
     String locString = locale.toString();
-    if ( locString.length() == 5 && locString.charAt( 2 ) == '_' ) // Force upper-lowercase format
-    {
+    if ( locString.length() == 5 && locString.charAt( 2 ) == '_' ) { // Force upper-lowercase format
       locString = locString.substring( 0, 2 ).toLowerCase() + "_" + locString.substring( 3 ).toUpperCase();
       // System.out.println("locString="+locString);
     }
@@ -181,7 +181,7 @@ public class GlobalMessages extends AbstractMessageHandler {
         // Now get the bundle from the messages files input stream
         //
         if ( inputStream != null ) {
-          bundle = new PropertyResourceBundle( inputStream );
+          bundle = new PropertyResourceBundle( new InputStreamReader( inputStream, "UTF-8" ) );
           locales.put( filename, bundle );
         } else {
           throw new MissingResourceException( "Unable to find properties file [" + filename + "]", locale

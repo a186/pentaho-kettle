@@ -30,14 +30,18 @@ import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateException;
+import java.util.List;
 
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSession;
 import javax.net.ssl.TrustManagerFactory;
 import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.MultivaluedMap;
+import javax.ws.rs.core.UriBuilder;
 
 import org.apache.commons.httpclient.auth.AuthScope;
+import org.json.simple.JSONObject;
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.encryption.Encr;
 import org.pentaho.di.core.exception.KettleException;
@@ -65,7 +69,7 @@ import com.sun.jersey.core.util.MultivaluedMapImpl;
 /**
  * @author Samatar
  * @since 16-jan-2011
- * 
+ *
  */
 
 public class Rest extends BaseStep implements StepInterface {
@@ -112,17 +116,34 @@ public class Rest extends BaseStep implements StepInterface {
       // used for calculating the responseTime
       long startTime = System.currentTimeMillis();
 
+      if ( data.useMatrixParams ) {
+        // Add matrix parameters
+        UriBuilder builder = webResource.getUriBuilder();
+        for ( int i = 0; i < data.nrMatrixParams; i++ ) {
+          String value = data.inputRowMeta.getString( rowData, data.indexOfMatrixParamFields[i] );
+          if ( isDebug() ) {
+            logDebug( BaseMessages.getString( PKG, "Rest.Log.matrixParameterValue", data.matrixParamNames[i], value ) );
+          }
+          builder = builder.matrixParam( data.matrixParamNames[i], value );
+        }
+        webResource = client.resource( builder.build() );
+      }
+
       if ( data.useParams ) {
-        // Add parameters
+        // Add query parameters
         for ( int i = 0; i < data.nrParams; i++ ) {
           MultivaluedMapImpl queryParams = new MultivaluedMapImpl();
           String value = data.inputRowMeta.getString( rowData, data.indexOfParamFields[i] );
           queryParams.add( data.paramNames[i], value );
           if ( isDebug() ) {
-            logDebug( BaseMessages.getString( PKG, "Rest.Log.parameterValue", data.paramNames[i], value ) );
+            logDebug( BaseMessages.getString( PKG, "Rest.Log.queryParameterValue", data.paramNames[i], value ) );
           }
           webResource = webResource.queryParams( queryParams );
         }
+      }
+
+      if ( isDebug() ) {
+        logDebug( BaseMessages.getString( PKG, "Rest.Log.ConnectingToURL", webResource.getURI() ) );
       }
 
       WebResource.Builder builder = webResource.getRequestBuilder();
@@ -184,11 +205,25 @@ public class Rest extends BaseStep implements StepInterface {
 
       // Get Response
       String body;
+      String headerString = null;
       try {
         body = response.getEntity( String.class );
       } catch ( UniformInterfaceException ex ) {
         body = "";
       }
+      // get Header
+      MultivaluedMap<String, String> headers = searchForHeaders( response );
+      JSONObject json = new JSONObject();
+      for ( java.util.Map.Entry<String, List<String>> entry : headers.entrySet() ) {
+        String name = entry.getKey();
+        List<String> value = entry.getValue();
+        if ( value.size() > 1 ) {
+          json.put( name, value );
+        } else {
+          json.put( name, value.get( 0 ) );
+        }
+      }
+      headerString = json.toJSONString();
       // for output
       int returnFieldsOffset = data.inputRowMeta.size();
       // add response to output
@@ -206,6 +241,10 @@ public class Rest extends BaseStep implements StepInterface {
       // add response time to output
       if ( !Const.isEmpty( data.resultResponseFieldName ) ) {
         newRow = RowDataUtil.addValueData( newRow, returnFieldsOffset, new Long( responseTime ) );
+      }
+      // add response header to output
+      if ( !Const.isEmpty( data.resultHeaderFieldName ) ) {
+        newRow = RowDataUtil.addValueData( newRow, returnFieldsOffset, headerString.toString() );
       }
     } catch ( Exception e ) {
       throw new KettleException( BaseMessages.getString( PKG, "Rest.Error.CanNotReadURL", data.realUrl ), e );
@@ -296,6 +335,10 @@ public class Rest extends BaseStep implements StepInterface {
     }
   }
 
+
+  protected MultivaluedMap<String, String> searchForHeaders( ClientResponse response ) {
+    return response.getHeaders();
+  }
   public boolean processRow( StepMetaInterface smi, StepDataInterface sdi ) throws KettleException {
     meta = (RestMeta) smi;
     data = (RestData) sdi;
@@ -392,6 +435,25 @@ public class Rest extends BaseStep implements StepInterface {
           }
           data.useParams = true;
         }
+
+        int nrmatrixparams = meta.getMatrixParameterField() == null ? 0 : meta.getMatrixParameterField().length;
+        if ( nrmatrixparams > 0 ) {
+          data.nrMatrixParams = nrmatrixparams;
+          data.matrixParamNames = new String[nrmatrixparams];
+          data.indexOfMatrixParamFields = new int[nrmatrixparams];
+          for ( int i = 0; i < nrmatrixparams; i++ ) {
+            data.matrixParamNames[i] = environmentSubstitute( meta.getMatrixParameterName()[i] );
+            String field = environmentSubstitute( meta.getMatrixParameterField()[i] );
+            if ( Const.isEmpty( field ) ) {
+              throw new KettleException( BaseMessages.getString( PKG, "Rest.Exception.MatrixParamFieldEmpty" ) );
+            }
+            data.indexOfMatrixParamFields[i] = data.inputRowMeta.indexOfValue( field );
+            if ( data.indexOfMatrixParamFields[i] < 0 ) {
+              throw new KettleException( BaseMessages.getString( PKG, "Rest.Exception.ErrorFindingField", field ) );
+            }
+          }
+          data.useMatrixParams = true;
+        }
       }
 
       // Do we need to set body
@@ -453,6 +515,7 @@ public class Rest extends BaseStep implements StepInterface {
       data.resultFieldName = environmentSubstitute( meta.getFieldName() );
       data.resultCodeFieldName = environmentSubstitute( meta.getResultCodeFieldName() );
       data.resultResponseFieldName = environmentSubstitute( meta.getResponseTimeFieldName() );
+      data.resultHeaderFieldName = environmentSubstitute( meta.getResponseHeaderFieldName() );
 
       // get authentication settings once
       data.realProxyHost = environmentSubstitute( meta.getProxyHost() );

@@ -34,8 +34,8 @@ import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
-import org.mortbay.jetty.testing.HttpTester;
-import org.mortbay.jetty.testing.ServletTester;
+import org.eclipse.jetty.testing.HttpTester;
+import org.eclipse.jetty.testing.ServletTester;
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.logging.LogChannel;
 import org.pentaho.di.core.row.ValueMeta;
@@ -72,7 +72,7 @@ public class CarteTest {
     tester = new ServletTester();
     tester.addServlet( GetRootServlet.class, "/*" );
     tester.addServlet( GetStatusServlet.class, GetStatusServlet.CONTEXT_PATH );
-    tester.addServlet( AddTransServlet.class, AddTransServlet.CONTEXT_PATH );
+    tester.addServlet( AddTransServlet.class, RegisterTransServlet.CONTEXT_PATH );
     tester.addServlet( StartTransServlet.class, StartTransServlet.CONTEXT_PATH );
     tester.addServlet( PauseTransServlet.class, PauseTransServlet.CONTEXT_PATH );
     try {
@@ -167,7 +167,7 @@ public class CarteTest {
     HttpTester response = new HttpTester();
     request.setMethod( "GET" );
     request.setHeader( "Host", "tester" );
-    request.setURI( AddTransServlet.CONTEXT_PATH + "?xml=Y" );
+    request.setURI( RegisterTransServlet.CONTEXT_PATH + "?xml=Y" );
     request.setVersion( "HTTP/1.0" );
     try {
 

@@ -28,7 +28,7 @@ import java.lang.annotation.Annotation;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.commons.vfs.FileObject;
+import org.apache.commons.vfs2.FileObject;
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.annotations.Step;
 import org.pentaho.di.core.exception.KettlePluginException;
@@ -54,6 +54,7 @@ import org.w3c.dom.Node;
     "BaseStep.Category.Utility",
     "BaseStep.Category.Flow",
     "BaseStep.Category.Scripting",
+    "BaseStep.Category.BAServer",
     "BaseStep.Category.Lookup",
     "BaseStep.Category.Joins",
     "BaseStep.Category.DataWarehouse",
@@ -206,7 +207,7 @@ public class StepPluginType extends BasePluginType implements PluginTypeInterfac
 
   @Override
   protected String extractDocumentationUrl( Annotation annotation ) {
-    return ( (Step) annotation ).documentationUrl();
+    return Const.getDocUrl( ( (Step) annotation ).documentationUrl() );
   }
 
   @Override

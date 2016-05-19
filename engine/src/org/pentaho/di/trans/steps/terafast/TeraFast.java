@@ -36,7 +36,7 @@ import java.util.List;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.StringUtils;
-import org.apache.commons.vfs.FileObject;
+import org.apache.commons.vfs2.FileObject;
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.database.Database;
 import org.pentaho.di.core.exception.KettleException;
@@ -281,7 +281,7 @@ public class TeraFast extends AbstractStep implements StepInterface {
   }
 
   private String pad( ValueMetaInterface valueMetaInterface, String data ) {
-    StringBuffer padding = new StringBuffer( data );
+    StringBuilder padding = new StringBuilder( data );
     int padLength = valueMetaInterface.getLength() - data.length();
     int currentPadLength = 0;
     while ( currentPadLength < padLength ) {

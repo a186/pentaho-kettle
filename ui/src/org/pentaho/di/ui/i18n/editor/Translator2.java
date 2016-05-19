@@ -32,7 +32,7 @@ import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
-import org.apache.commons.vfs.FileObject;
+import org.apache.commons.vfs2.FileObject;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.SashForm;
 import org.eclipse.swt.events.ModifyEvent;
@@ -396,7 +396,7 @@ public class Translator2 {
     addGrid();
     addListeners();
 
-    sashform.setWeights( new int[] { 20, 80 } );
+    sashform.setWeights( new int[] { 40, 60 } );
     sashform.setVisible( true );
 
     shell.pack();
@@ -486,7 +486,7 @@ public class Translator2 {
     fdLocale.left = new FormAttachment( 0, 0 );
     fdLocale.right = new FormAttachment( 100, 0 );
     fdLocale.top = new FormAttachment( 0, 0 );
-    fdLocale.bottom = new FormAttachment( 20, 0 );
+    fdLocale.bottom = new FormAttachment( 10, 0 );
     wLocale.setLayoutData( fdLocale );
 
     ColumnInfo[] colinfo =
@@ -496,10 +496,7 @@ public class Translator2 {
         new ColumnInfo(
           BaseMessages.getString( PKG, "i18nDialog.Packagename" ), ColumnInfo.COLUMN_TYPE_TEXT, false, true ), };
 
-    wPackages =
-      new TableView(
-        new Variables(), composite, SWT.FULL_SELECTION | SWT.SINGLE | SWT.BORDER, colinfo, 1, true, null,
-        props );
+    wPackages = new TableView( new Variables(), composite, SWT.FULL_SELECTION | SWT.SINGLE | SWT.BORDER, colinfo, 1, true, null, props );
     FormData fdPackages = new FormData();
     fdPackages.left = new FormAttachment( 0, 0 );
     fdPackages.right = new FormAttachment( 100, 0 );
@@ -798,7 +795,7 @@ public class Translator2 {
     java.util.List<MessagesStore> changedMessagesStores = store.getChangedMessagesStores();
     if ( changedMessagesStores.size() > 0 ) {
 
-      StringBuffer msg = new StringBuffer();
+      StringBuilder msg = new StringBuilder();
       for ( MessagesStore messagesStore : changedMessagesStores ) {
         String filename = messagesStore.getSaveFilename( messagesStore.getSourceFolder() );
         messagesStore.setFilename( filename );
@@ -844,7 +841,7 @@ public class Translator2 {
       java.util.List<MessagesStore> messagesStores = store.getMessagesStores( selectedLocale, null );
       if ( messagesStores.size() > 0 ) {
 
-        StringBuffer msg = new StringBuffer();
+        StringBuilder msg = new StringBuilder();
         for ( MessagesStore messagesStore : messagesStores ) {
           // Find the main locale variation for this messages store...
           //
@@ -1122,6 +1119,7 @@ public class Translator2 {
       } else {
         wPackages.setRowNums();
         wPackages.optWidth( true );
+        wPackages.getTable().getColumn( 1 ).setWidth( 100 );
       }
     }
 

@@ -25,8 +25,8 @@ package org.pentaho.di.resource;
 import java.util.HashMap;
 import java.util.Map;
 
-import org.apache.commons.vfs.FileObject;
-import org.apache.commons.vfs.FileSystemException;
+import org.apache.commons.vfs2.FileObject;
+import org.apache.commons.vfs2.FileSystemException;
 import org.pentaho.di.core.variables.VariableSpace;
 
 public class SimpleResourceNaming implements ResourceNamingInterface {
@@ -236,7 +236,7 @@ public class SimpleResourceNaming implements ResourceNamingInterface {
       length -= extension.length();
     }
 
-    StringBuffer buff = new StringBuffer( length );
+    StringBuilder buff = new StringBuilder( length );
     char ch;
     for ( int i = 0; i < length; i++ ) {
       ch = name.charAt( i );

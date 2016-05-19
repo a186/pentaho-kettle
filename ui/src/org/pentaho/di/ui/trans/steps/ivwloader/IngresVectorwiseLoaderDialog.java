@@ -80,8 +80,6 @@ public class IngresVectorwiseLoaderDialog extends BaseStepDialog implements Step
 
   private static Class<?> PKG = IngresVectorwiseLoaderMeta.class; // for i18n purposes, needed by Translator2!!
 
-  private static final char PASSWD_ECHO_CHAR = '*';
-
   private int middle;
   private int margin;
 
@@ -403,12 +401,6 @@ public class IngresVectorwiseLoaderDialog extends BaseStepDialog implements Step
     return targetControl;
   }
 
-  protected TextVar addPasswordTextVar( String labelMessageKey, Control prevControl ) {
-    TextVar textVar = addStandardTextVar( labelMessageKey, prevControl );
-    textVar.setEchoChar( PASSWD_ECHO_CHAR );
-    return textVar;
-  }
-
   protected Button addStandardCheckBox( String labelMessageKey, Control prevControl ) {
     Label label = addStandardLabel( labelMessageKey, prevControl );
     Button targetControl = new Button( shell, SWT.CHECK );
@@ -664,8 +656,8 @@ public class IngresVectorwiseLoaderDialog extends BaseStepDialog implements Step
     // Create the existing mapping list...
     //
     List<SourceToTargetMapping> mappings = new ArrayList<SourceToTargetMapping>();
-    StringBuffer missingSourceFields = new StringBuffer();
-    StringBuffer missingTargetFields = new StringBuffer();
+    StringBuilder missingSourceFields = new StringBuilder();
+    StringBuilder missingTargetFields = new StringBuilder();
 
     int nrFields = wFields.nrNonEmpty();
     for ( int i = 0; i < nrFields; i++ ) {

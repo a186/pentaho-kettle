@@ -40,9 +40,9 @@ import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 
-import org.apache.commons.vfs.FileObject;
-import org.apache.commons.vfs.FileSelectInfo;
-import org.apache.commons.vfs.FileSelector;
+import org.apache.commons.vfs2.FileObject;
+import org.apache.commons.vfs2.FileSelectInfo;
+import org.apache.commons.vfs2.FileSelector;
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.exception.KettleXMLException;
 import org.pentaho.di.core.fileinput.FileInputList;
@@ -339,8 +339,8 @@ public class MessagesSourceCrawler {
       boolean extraLine;
       do {
         extraLine = false;
-        for ( String scanPhrase : scanPhrases ) {
-          if ( line2.endsWith( scanPhrase ) ) {
+        for ( String joinPhrase : new String[] { "BaseMessages.getString(", "BaseMessages.getString( PKG," } ) {
+          if ( line2.endsWith( joinPhrase ) ) {
             extraLine = true;
             break;
           }

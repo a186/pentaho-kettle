@@ -28,7 +28,7 @@ import java.lang.annotation.Annotation;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.commons.vfs.FileObject;
+import org.apache.commons.vfs2.FileObject;
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.annotations.JobEntry;
 import org.pentaho.di.core.exception.KettlePluginException;
@@ -52,10 +52,10 @@ import org.w3c.dom.Node;
   getNaturalCategoriesOrder = {
     "JobCategory.Category.General", "JobCategory.Category.Mail", "JobCategory.Category.FileManagement",
     "JobCategory.Category.Conditions", "JobCategory.Category.Scripting", "JobCategory.Category.BulkLoading",
-    "JobCategory.Category.BigData", "JobCategory.Category.DataQuality", "JobCategory.Category.XML",
-    "JobCategory.Category.Utility", "JobCategory.Category.Repository", "JobCategory.Category.FileTransfer",
-    "JobCategory.Category.FileEncryption", "JobCategory.Category.Palo", "JobCategory.Category.Experimental",
-    "JobCategory.Category.Deprecated" }, i18nPackageClass = JobMeta.class )
+    "JobCategory.Category.BigData", "JobCategory.Category.Modeling", "JobCategory.Category.DataQuality",
+    "JobCategory.Category.XML", "JobCategory.Category.Utility", "JobCategory.Category.Repository",
+    "JobCategory.Category.FileTransfer", "JobCategory.Category.FileEncryption", "JobCategory.Category.Palo",
+    "JobCategory.Category.Experimental", "JobCategory.Category.Deprecated" }, i18nPackageClass = JobMeta.class )
 @PluginMainClassType( JobEntryInterface.class )
 @PluginAnnotationType( JobEntry.class )
 public class JobEntryPluginType extends BasePluginType implements PluginTypeInterface {
@@ -212,7 +212,7 @@ public class JobEntryPluginType extends BasePluginType implements PluginTypeInte
 
   @Override
   protected String extractDocumentationUrl( Annotation annotation ) {
-    return ( (JobEntry) annotation ).documentationUrl();
+    return Const.getDocUrl( ( (JobEntry) annotation ).documentationUrl() );
   }
 
   @Override

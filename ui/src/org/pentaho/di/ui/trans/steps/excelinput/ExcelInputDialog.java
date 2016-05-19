@@ -27,7 +27,7 @@ import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.commons.vfs.FileObject;
+import org.apache.commons.vfs2.FileObject;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.CCombo;
 import org.eclipse.swt.custom.CTabFolder;
@@ -1102,9 +1102,7 @@ public class ExcelInputDialog extends BaseStepDialog implements StepDialogInterf
     // Listen to the Browse... button
     wbbFilename.addSelectionListener( new SelectionAdapter() {
       public void widgetSelected( SelectionEvent e ) {
-        if ( !Const.isEmpty( wFilemask.getText() ) || !Const.isEmpty( wExcludeFilemask.getText() ) ) // A mask: a
-                                                                                                     // directory!
-        {
+        if ( !Const.isEmpty( wFilemask.getText() ) || !Const.isEmpty( wExcludeFilemask.getText() ) ) { // A mask: a directory!
           DirectoryDialog dialog = new DirectoryDialog( shell, SWT.OPEN );
           if ( wFilename.getText() != null ) {
             String fpath = transMeta.environmentSubstitute( wFilename.getText() );
@@ -1121,7 +1119,10 @@ public class ExcelInputDialog extends BaseStepDialog implements StepDialogInterf
           SpreadSheetType type = SpreadSheetType.getStpreadSheetTypeByDescription( wSpreadSheetType.getText() );
           switch ( type ) {
             case POI:
-              extentions = new String[] { "*.xls;*.XLS;*.xlxs;*.XLSX", "*" };
+              extentions = new String[] { "*.xls;*.XLS;*.xlsx;*.XLSX", "*" };
+              break;
+            case SAX_POI:
+              extentions = new String[] { "*.xlsx;*.XLSX", "*" };
               break;
             case ODS:
               extentions = new String[] { "*.ods;*.ODS;", "*" };

@@ -2,7 +2,7 @@
  *
  * Pentaho Data Integration
  *
- * Copyright (C) 2002-2013 by Pentaho : http://www.pentaho.com
+ * Copyright (C) 2002-2016 by Pentaho : http://www.pentaho.com
  *
  *******************************************************************************
  *
@@ -23,19 +23,22 @@
 package org.pentaho.di.cluster;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
 import java.net.InetAddress;
 import java.net.URLEncoder;
+import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
+import java.util.Random;
 
-import org.apache.commons.httpclient.Credentials;
 import org.apache.commons.httpclient.Header;
 import org.apache.commons.httpclient.HttpClient;
 import org.apache.commons.httpclient.UsernamePasswordCredentials;
@@ -54,7 +57,7 @@ import org.pentaho.di.core.exception.KettleValueException;
 import org.pentaho.di.core.logging.LogChannel;
 import org.pentaho.di.core.logging.LogChannelInterface;
 import org.pentaho.di.core.row.RowMetaInterface;
-import org.pentaho.di.core.row.ValueMeta;
+import org.pentaho.di.core.row.value.ValueMetaString;
 import org.pentaho.di.core.variables.VariableSpace;
 import org.pentaho.di.core.variables.Variables;
 import org.pentaho.di.core.vfs.KettleVFS;
@@ -72,11 +75,13 @@ import org.pentaho.di.www.AddExportServlet;
 import org.pentaho.di.www.AllocateServerSocketServlet;
 import org.pentaho.di.www.CleanupTransServlet;
 import org.pentaho.di.www.GetJobStatusServlet;
+import org.pentaho.di.www.GetPropertiesServlet;
 import org.pentaho.di.www.GetSlavesServlet;
 import org.pentaho.di.www.GetStatusServlet;
 import org.pentaho.di.www.GetTransStatusServlet;
 import org.pentaho.di.www.NextSequenceValueServlet;
 import org.pentaho.di.www.PauseTransServlet;
+import org.pentaho.di.www.RegisterPackageServlet;
 import org.pentaho.di.www.RemoveJobServlet;
 import org.pentaho.di.www.RemoveTransServlet;
 import org.pentaho.di.www.SlaveServerDetection;
@@ -84,6 +89,7 @@ import org.pentaho.di.www.SlaveServerJobStatus;
 import org.pentaho.di.www.SlaveServerStatus;
 import org.pentaho.di.www.SlaveServerTransStatus;
 import org.pentaho.di.www.SniffStepServlet;
+import org.pentaho.di.www.SslConfiguration;
 import org.pentaho.di.www.StartJobServlet;
 import org.pentaho.di.www.StartTransServlet;
 import org.pentaho.di.www.StopJobServlet;
@@ -93,14 +99,43 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 
 public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectInterface, VariableSpace,
-  RepositoryElementInterface, XMLInterface {
+    RepositoryElementInterface, XMLInterface {
   private static Class<?> PKG = SlaveServer.class; // for i18n purposes, needed by Translator2!!
 
   public static final String STRING_SLAVESERVER = "Slave Server";
 
+  private static final Random RANDOM = new Random();
+
   public static final String XML_TAG = "slaveserver";
 
   public static final RepositoryObjectType REPOSITORY_ELEMENT_TYPE = RepositoryObjectType.SLAVE_SERVER;
+
+  private static final String HTTP = "http";
+  private static final String HTTPS = "https";
+
+  public static final String SSL_MODE_TAG = "sslMode";
+
+  private static final int NOT_FOUND_ERROR = 404;
+
+  public static final int KETTLE_CARTE_RETRIES = getNumberOfSlaveServerRetries();
+
+  public static final int KETTLE_CARTE_RETRY_BACKOFF_INCREMENTS = getBackoffIncrements();
+
+  private static int getNumberOfSlaveServerRetries() {
+    try {
+      return Integer.parseInt( Const.NVL( System.getProperty( "KETTLE_CARTE_RETRIES" ), "0" ) );
+    } catch ( Exception e ) {
+      return 0;
+    }
+  }
+
+  public static int getBackoffIncrements() {
+    try {
+      return Integer.parseInt( Const.NVL( System.getProperty( "KETTLE_CARTE_RETRY_BACKOFF_INCREMENTS" ), "1000" ) );
+    } catch ( Exception e ) {
+      return 1000;
+    }
+  }
 
   private LogChannelInterface log;
 
@@ -122,6 +157,10 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
 
   private String nonProxyHosts;
 
+  private String propertiesMasterName;
+
+  private boolean overrideExistingProperties;
+
   private boolean master;
 
   private boolean shared;
@@ -134,6 +173,10 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
 
   private Date changedDate;
 
+  private boolean sslMode;
+
+  private SslConfiguration sslConfig;
+
   public SlaveServer() {
     initializeVariablesFrom( null );
     id = null;
@@ -142,11 +185,16 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
   }
 
   public SlaveServer( String name, String hostname, String port, String username, String password ) {
-    this( name, hostname, port, username, password, null, null, null, false );
+    this( name, hostname, port, username, password, null, null, null, false, false );
   }
 
   public SlaveServer( String name, String hostname, String port, String username, String password,
-    String proxyHostname, String proxyPort, String nonProxyHosts, boolean master ) {
+                      String proxyHostname, String proxyPort, String nonProxyHosts, boolean master ) {
+    this( name, hostname, port, username, password, proxyHostname, proxyPort, nonProxyHosts, master, false );
+  }
+
+  public SlaveServer( String name, String hostname, String port, String username, String password,
+                      String proxyHostname, String proxyPort, String nonProxyHosts, boolean master, boolean ssl ) {
     this();
     this.name = name;
     this.hostname = hostname;
@@ -174,10 +222,19 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
     this.proxyHostname = XMLHandler.getTagValue( slaveNode, "proxy_hostname" );
     this.proxyPort = XMLHandler.getTagValue( slaveNode, "proxy_port" );
     this.nonProxyHosts = XMLHandler.getTagValue( slaveNode, "non_proxy_hosts" );
+    this.propertiesMasterName = XMLHandler.getTagValue( slaveNode, "get_properties_from_master" );
+    this.overrideExistingProperties =
+        "Y".equalsIgnoreCase( XMLHandler.getTagValue( slaveNode, "override_existing_properties" ) );
     this.master = "Y".equalsIgnoreCase( XMLHandler.getTagValue( slaveNode, "master" ) );
     initializeVariablesFrom( null );
     this.log = new LogChannel( this );
 
+    setSslMode( "Y".equalsIgnoreCase( XMLHandler.getTagValue( slaveNode, SSL_MODE_TAG ) ) );
+    Node sslConfig = XMLHandler.getSubNode( slaveNode, SslConfiguration.XML_TAG );
+    if ( sslConfig != null ) {
+      setSslMode( true );
+      this.sslConfig = new SslConfiguration( sslConfig );
+    }
   }
 
   public LogChannelInterface getLogChannel() {
@@ -199,6 +256,10 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
     xml.append( XMLHandler.addTagValue( "proxy_port", proxyPort, false ) );
     xml.append( XMLHandler.addTagValue( "non_proxy_hosts", nonProxyHosts, false ) );
     xml.append( XMLHandler.addTagValue( "master", master, false ) );
+    xml.append( XMLHandler.addTagValue( SSL_MODE_TAG, isSslMode(), false ) );
+    if ( sslConfig != null ) {
+      xml.append( sslConfig.getXML() );
+    }
 
     xml.append( "</" ).append( XML_TAG ).append( ">" );
 
@@ -226,6 +287,7 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
     this.id = slaveServer.id;
     this.shared = slaveServer.shared;
     this.setChanged( true );
+    this.sslMode = slaveServer.sslMode;
   }
 
   public String toString() {
@@ -268,8 +330,7 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
   }
 
   /**
-   * @param password
-   *          the password to set
+   * @param password the password to set
    */
   public void setPassword( String password ) {
     this.password = password;
@@ -283,8 +344,7 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
   }
 
   /**
-   * @param username
-   *          the username to set
+   * @param username the username to set
    */
   public void setUsername( String username ) {
     this.username = username;
@@ -298,8 +358,7 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
   }
 
   /**
-   * @param webAppName
-   *          the web application name to set
+   * @param webAppName the web application name to set
    */
   public void setWebAppName( String webAppName ) {
     this.webAppName = webAppName;
@@ -313,8 +372,7 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
   }
 
   /**
-   * @param nonProxyHosts
-   *          the nonProxyHosts to set
+   * @param nonProxyHosts the nonProxyHosts to set
    */
   public void setNonProxyHosts( String nonProxyHosts ) {
     this.nonProxyHosts = nonProxyHosts;
@@ -328,8 +386,7 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
   }
 
   /**
-   * @param proxyHostname
-   *          the proxyHostname to set
+   * @param proxyHostname the proxyHostname to set
    */
   public void setProxyHostname( String proxyHostname ) {
     this.proxyHostname = proxyHostname;
@@ -343,11 +400,38 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
   }
 
   /**
-   * @param proxyPort
-   *          the proxyPort to set
+   * @param proxyPort the proxyPort to set
    */
   public void setProxyPort( String proxyPort ) {
     this.proxyPort = proxyPort;
+  }
+
+  /**
+   * @return the Master name for read properties
+   */
+  public String getPropertiesMasterName() {
+    return propertiesMasterName;
+  }
+
+  /**
+   * @return flag for read properties from Master
+   */
+  public boolean isOverrideExistingProperties() {
+    return overrideExistingProperties;
+  }
+
+  /**
+   * @return the port
+   */
+  public String getPort() {
+    return port;
+  }
+
+  /**
+   * @param port the port to set
+   */
+  public void setPort( String port ) {
+    this.port = port;
   }
 
   public String getPortSpecification() {
@@ -361,27 +445,12 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
 
   public String constructUrl( String serviceAndArguments ) throws UnsupportedEncodingException {
     String realHostname = environmentSubstitute( hostname );
-    if ( !StringUtils.isEmpty( webAppName ) ) {
+    if ( !StringUtils.isBlank( webAppName ) ) {
       serviceAndArguments = "/" + environmentSubstitute( getWebAppName() ) + serviceAndArguments;
     }
-    String retval = "http://" + realHostname + getPortSpecification() + serviceAndArguments;
+    String retval = ( isSslMode() ? HTTPS : HTTP ) + "://" + realHostname + getPortSpecification() + serviceAndArguments;
     retval = Const.replace( retval, " ", "%20" );
     return retval;
-  }
-
-  /**
-   * @return the port
-   */
-  public String getPort() {
-    return port;
-  }
-
-  /**
-   * @param port
-   *          the port to set
-   */
-  public void setPort( String port ) {
-    this.port = port;
   }
 
   // Method is defined as package-protected in order to be accessible by unit tests
@@ -415,9 +484,7 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
 
       // The status code
       if ( log.isDebug() ) {
-        log
-          .logDebug( BaseMessages
-            .getString( PKG, "SlaveServer.DEBUG_ResponseStatus", Integer.toString( result ) ) );
+        log.logDebug( BaseMessages.getString( PKG, "SlaveServer.DEBUG_ResponseStatus", Integer.toString( result ) ) );
       }
 
       String responseBody = getResponseBodyAsString( method.getResponseBodyAsStream() );
@@ -427,8 +494,21 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
       }
 
       if ( result >= 400 ) {
-        throw new KettleException( String.format( "HTTP Status %d - %s - %s", method.getStatusCode(), method.getPath(),
-            method.getStatusText() ) );
+        String message;
+        if ( result == NOT_FOUND_ERROR ) {
+          message = String.format( "%s%s%s%s",
+            BaseMessages.getString( PKG, "SlaveServer.Error.404.Title" ),
+            Const.CR, Const.CR,
+            BaseMessages.getString( PKG, "SlaveServer.Error.404.Message" )
+          );
+        } else {
+          message = String.format( "HTTP Status %d - %s - %s",
+            method.getStatusCode(),
+            method.getPath(),
+            method.getStatusText()
+          );
+        }
+        throw new KettleException( message );
       }
 
       return responseBody;
@@ -436,19 +516,19 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
       // Release current connection to the connection pool once you are done
       method.releaseConnection();
       if ( log.isDetailed() ) {
-        log.logDetailed( BaseMessages.getString(
-          PKG, "SlaveServer.DETAILED_SentXmlToService", service, environmentSubstitute( hostname ) ) );
+        log.logDetailed( BaseMessages.getString( PKG, "SlaveServer.DETAILED_SentXmlToService", service,
+            environmentSubstitute( hostname ) ) );
       }
     }
   }
 
   // Method is defined as package-protected in order to be accessible by unit tests
   PostMethod buildSendExportMethod( String type, String load, InputStream is ) throws UnsupportedEncodingException {
-    String serviceUrl = AddExportServlet.CONTEXT_PATH;
+    String serviceUrl = RegisterPackageServlet.CONTEXT_PATH;
     if ( type != null && load != null ) {
       serviceUrl +=
-          "/?" + AddExportServlet.PARAMETER_TYPE + "=" + type + "&" + AddExportServlet.PARAMETER_LOAD + "="
-              + URLEncoder.encode( load, "UTF-8" );
+        "/?" + AddExportServlet.PARAMETER_TYPE + "=" + type + "&" + AddExportServlet.PARAMETER_LOAD + "="
+          + URLEncoder.encode( load, "UTF-8" );
     }
 
     String urlString = constructUrl( serviceUrl );
@@ -467,18 +547,13 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
   /**
    * Send an exported archive over to this slave server
    *
-   * @param filename
-   *          The archive to send
-   * @param type
-   *          The type of file to add to the slave server (AddExportServlet.TYPE_*)
-   * @param load
-   *          The filename to load in the archive (the .kjb or .ktr)
+   * @param filename The archive to send
+   * @param type     The type of file to add to the slave server (AddExportServlet.TYPE_*)
+   * @param load     The filename to load in the archive (the .kjb or .ktr)
    * @return the XML of the web result
-   * @throws Exception
-   *           in case something goes awry
+   * @throws Exception in case something goes awry
    */
   public String sendExport( String filename, String type, String load ) throws Exception {
-
     // Request content will be retrieved directly from the input stream
     //
     InputStream is = null;
@@ -493,8 +568,7 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
 
         // The status code
         if ( log.isDebug() ) {
-          log.logDebug( BaseMessages
-            .getString( PKG, "SlaveServer.DEBUG_ResponseStatus", Integer.toString( result ) ) );
+          log.logDebug( BaseMessages.getString( PKG, "SlaveServer.DEBUG_ResponseStatus", Integer.toString( result ) ) );
         }
 
         String responseBody = getResponseBodyAsString( method.getResponseBodyAsStream() );
@@ -506,7 +580,7 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
 
         if ( result >= 400 ) {
           throw new KettleException( String.format( "HTTP Status %d - %s - %s", method.getStatusCode(), method
-              .getPath(), method.getStatusText() ) );
+            .getPath(), method.getStatusText() ) );
         }
 
         return responseBody;
@@ -514,9 +588,8 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
         // Release current connection to the connection pool once you are done
         method.releaseConnection();
         if ( log.isDetailed() ) {
-          log.logDetailed( BaseMessages.getString(
-            PKG, "SlaveServer.DETAILED_SentExportToService", AddExportServlet.CONTEXT_PATH,
-            environmentSubstitute( hostname ) ) );
+          log.logDetailed( BaseMessages.getString( PKG, "SlaveServer.DETAILED_SentExportToService",
+              RegisterPackageServlet.CONTEXT_PATH, environmentSubstitute( hostname ) ) );
         }
       }
     } finally {
@@ -546,19 +619,11 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
   }
 
   public void addCredentials( HttpClient client ) {
-    if ( StringUtils.isEmpty( webAppName ) ) {
-      client.getState().setCredentials(
-        new AuthScope(
-          environmentSubstitute( hostname ), Const.toInt( environmentSubstitute( port ), 80 ), "Kettle" ),
+    client.getState().setCredentials(
+        new AuthScope( environmentSubstitute( hostname ), Const.toInt( environmentSubstitute( port ), 80 ) ),
         new UsernamePasswordCredentials( environmentSubstitute( username ), Encr
-          .decryptPasswordOptionallyEncrypted( environmentSubstitute( password ) ) ) );
-    } else {
-      Credentials creds =
-        new UsernamePasswordCredentials( environmentSubstitute( username ), Encr
-          .decryptPasswordOptionallyEncrypted( environmentSubstitute( password ) ) );
-      client.getState().setCredentials( AuthScope.ANY, creds );
-      client.getParams().setAuthenticationPreemptive( true );
-    }
+            .decryptPasswordOptionallyEncrypted( environmentSubstitute( password ) ) ) );
+    client.getParams().setAuthenticationPreemptive( true );
   }
 
   /**
@@ -569,11 +634,45 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
   }
 
   /**
-   * @param master
-   *          the master to set
+   * @param master the master to set
    */
   public void setMaster( boolean master ) {
     this.master = master;
+  }
+
+  public String execService( String service, boolean retry ) throws Exception {
+    int tries = 0;
+    int maxRetries = 0;
+    if ( retry ) {
+      maxRetries = KETTLE_CARTE_RETRIES;
+    }
+    while ( true ) {
+      try {
+        return execService( service );
+      } catch ( Exception e ) {
+        if ( tries >= maxRetries ) {
+          throw e;
+        } else {
+          try {
+            Thread.sleep( getDelay( tries ) );
+          } catch ( InterruptedException e2 ) {
+            //ignore
+          }
+        }
+      }
+      tries++;
+    }
+  }
+
+  public static long getDelay( int trial ) {
+    long current = KETTLE_CARTE_RETRY_BACKOFF_INCREMENTS;
+    long previous = 0;
+    for ( int i = 0; i < trial; i++ ) {
+      long tmp = current;
+      current = current + previous;
+      previous = tmp;
+    }
+    return current + RANDOM.nextInt( (int) Math.min( Integer.MAX_VALUE, current / 4L ) );
   }
 
   public synchronized String execService( String service ) throws Exception {
@@ -598,7 +697,8 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
   }
 
   // Method is defined as package-protected in order to be accessible by unit tests
-  GetMethod buildExecuteServiceMethod( String service, Map<String, String> headerValues ) throws UnsupportedEncodingException {
+  GetMethod buildExecuteServiceMethod( String service, Map<String, String> headerValues )
+    throws UnsupportedEncodingException {
     GetMethod method = new GetMethod( constructUrl( service ) );
 
     for ( String key : headerValues.keySet() ) {
@@ -619,12 +719,10 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
 
       // The status code
       if ( log.isDebug() ) {
-        log
-          .logDebug( BaseMessages
-            .getString( PKG, "SlaveServer.DEBUG_ResponseStatus", Integer.toString( result ) ) );
+        log.logDebug( BaseMessages.getString( PKG, "SlaveServer.DEBUG_ResponseStatus", Integer.toString( result ) ) );
       }
 
-      String responseBody = getResponseBodyAsString( method.getResponseBodyAsStream() );
+      String responseBody = method.getResponseBodyAsString();
 
       if ( log.isDetailed() ) {
         log.logDetailed( BaseMessages.getString( PKG, "SlaveServer.DETAILED_FinishedReading", Integer
@@ -677,90 +775,91 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
     return detections;
   }
 
-  public SlaveServerTransStatus getTransStatus( String transName, String carteObjectId, int startLogLineNr ) throws Exception {
+  public SlaveServerTransStatus getTransStatus( String transName, String carteObjectId, int startLogLineNr )
+    throws Exception {
     String xml =
-      execService( GetTransStatusServlet.CONTEXT_PATH
-        + "/?name=" + URLEncoder.encode( transName, "UTF-8" ) + "&id=" + Const.NVL( carteObjectId, "" )
-        + "&xml=Y&from=" + startLogLineNr );
+        execService( GetTransStatusServlet.CONTEXT_PATH + "/?name=" + URLEncoder.encode( transName, "UTF-8" ) + "&id="
+            + Const.NVL( carteObjectId, "" ) + "&xml=Y&from=" + startLogLineNr, true );
     return SlaveServerTransStatus.fromXML( xml );
   }
 
   public SlaveServerJobStatus getJobStatus( String jobName, String carteObjectId, int startLogLineNr ) throws Exception {
     String xml =
-      execService( GetJobStatusServlet.CONTEXT_PATH
-        + "/?name=" + URLEncoder.encode( jobName, "UTF-8" ) + "&id=" + Const.NVL( carteObjectId, "" )
-        + "&xml=Y&from=" + startLogLineNr );
+        execService( GetJobStatusServlet.CONTEXT_PATH + "/?name=" + URLEncoder.encode( jobName, "UTF-8" ) + "&id="
+            + Const.NVL( carteObjectId, "" ) + "&xml=Y&from=" + startLogLineNr, true );
     return SlaveServerJobStatus.fromXML( xml );
   }
 
   public WebResult stopTransformation( String transName, String carteObjectId ) throws Exception {
     String xml =
-      execService( StopTransServlet.CONTEXT_PATH
-        + "/?name=" + URLEncoder.encode( transName, "UTF-8" ) + "&id=" + Const.NVL( carteObjectId, "" )
-        + "&xml=Y" );
+        execService( StopTransServlet.CONTEXT_PATH + "/?name=" + URLEncoder.encode( transName, "UTF-8" ) + "&id="
+            + Const.NVL( carteObjectId, "" ) + "&xml=Y" );
     return WebResult.fromXMLString( xml );
   }
 
   public WebResult pauseResumeTransformation( String transName, String carteObjectId ) throws Exception {
     String xml =
-      execService( PauseTransServlet.CONTEXT_PATH
-        + "/?name=" + URLEncoder.encode( transName, "UTF-8" ) + "&id=" + Const.NVL( carteObjectId, "" )
-        + "&xml=Y" );
+        execService( PauseTransServlet.CONTEXT_PATH + "/?name=" + URLEncoder.encode( transName, "UTF-8" ) + "&id="
+            + Const.NVL( carteObjectId, "" ) + "&xml=Y" );
     return WebResult.fromXMLString( xml );
   }
 
   public WebResult removeTransformation( String transName, String carteObjectId ) throws Exception {
     String xml =
-      execService( RemoveTransServlet.CONTEXT_PATH
-        + "/?name=" + URLEncoder.encode( transName, "UTF-8" ) + "&id=" + Const.NVL( carteObjectId, "" )
-        + "&xml=Y" );
+        execService( RemoveTransServlet.CONTEXT_PATH + "/?name=" + URLEncoder.encode( transName, "UTF-8" ) + "&id="
+            + Const.NVL( carteObjectId, "" ) + "&xml=Y" );
     return WebResult.fromXMLString( xml );
   }
 
   public WebResult removeJob( String jobName, String carteObjectId ) throws Exception {
     String xml =
-      execService( RemoveJobServlet.CONTEXT_PATH
-        + "/?name=" + URLEncoder.encode( jobName, "UTF-8" ) + "&id=" + Const.NVL( carteObjectId, "" )
-        + "&xml=Y" );
+        execService( RemoveJobServlet.CONTEXT_PATH + "/?name=" + URLEncoder.encode( jobName, "UTF-8" ) + "&id="
+            + Const.NVL( carteObjectId, "" ) + "&xml=Y" );
     return WebResult.fromXMLString( xml );
   }
 
   public WebResult stopJob( String transName, String carteObjectId ) throws Exception {
     String xml =
-      execService( StopJobServlet.CONTEXT_PATH
-        + "/?name=" + URLEncoder.encode( transName, "UTF-8" ) + "&xml=Y&id=" + Const.NVL( carteObjectId, "" ) );
+        execService( StopJobServlet.CONTEXT_PATH + "/?name=" + URLEncoder.encode( transName, "UTF-8" ) + "&xml=Y&id="
+            + Const.NVL( carteObjectId, "" ) );
     return WebResult.fromXMLString( xml );
   }
 
   public WebResult startTransformation( String transName, String carteObjectId ) throws Exception {
     String xml =
-      execService( StartTransServlet.CONTEXT_PATH
-        + "/?name=" + URLEncoder.encode( transName, "UTF-8" ) + "&id=" + Const.NVL( carteObjectId, "" )
-        + "&xml=Y" );
+        execService( StartTransServlet.CONTEXT_PATH + "/?name=" + URLEncoder.encode( transName, "UTF-8" ) + "&id="
+            + Const.NVL( carteObjectId, "" ) + "&xml=Y" );
     return WebResult.fromXMLString( xml );
   }
 
   public WebResult startJob( String jobName, String carteObjectId ) throws Exception {
     String xml =
-      execService( StartJobServlet.CONTEXT_PATH
-        + "/?name=" + URLEncoder.encode( jobName, "UTF-8" ) + "&xml=Y&id=" + Const.NVL( carteObjectId, "" ) );
+        execService( StartJobServlet.CONTEXT_PATH + "/?name=" + URLEncoder.encode( jobName, "UTF-8" ) + "&xml=Y&id="
+            + Const.NVL( carteObjectId, "" ) );
     return WebResult.fromXMLString( xml );
   }
 
   public WebResult cleanupTransformation( String transName, String carteObjectId ) throws Exception {
     String xml =
-      execService( CleanupTransServlet.CONTEXT_PATH
-        + "/?name=" + URLEncoder.encode( transName, "UTF-8" ) + "&id=" + Const.NVL( carteObjectId, "" )
-        + "&xml=Y" );
+        execService( CleanupTransServlet.CONTEXT_PATH + "/?name=" + URLEncoder.encode( transName, "UTF-8" ) + "&id="
+            + Const.NVL( carteObjectId, "" ) + "&xml=Y" );
     return WebResult.fromXMLString( xml );
   }
 
   public synchronized WebResult deAllocateServerSockets( String transName, String clusteredRunId ) throws Exception {
     String xml =
-      execService( CleanupTransServlet.CONTEXT_PATH
-        + "/?name=" + URLEncoder.encode( transName, "UTF-8" ) + "&id=" + Const.NVL( clusteredRunId, "" )
-        + "&xml=Y&sockets=Y" );
+        execService( CleanupTransServlet.CONTEXT_PATH + "/?name=" + URLEncoder.encode( transName, "UTF-8" ) + "&id="
+            + Const.NVL( clusteredRunId, "" ) + "&xml=Y&sockets=Y" );
     return WebResult.fromXMLString( xml );
+  }
+
+  public Properties getKettleProperties() throws Exception {
+    String xml = execService( GetPropertiesServlet.CONTEXT_PATH + "/?xml=Y" );
+    String decryptedXml =  Encr.decryptPassword( xml );
+    InputStream in = new ByteArrayInputStream( decryptedXml.getBytes() );
+    Properties properties = new Properties();
+    properties.loadFromXML( in );
+    return properties;
   }
 
   public static SlaveServer findSlaveServer( List<SlaveServer> slaveServers, String name ) {
@@ -782,17 +881,19 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
   }
 
   public static String[] getSlaveServerNames( List<SlaveServer> slaveServers ) {
-    String[] names = new String[slaveServers.size()];
+    String[] names = new String[ slaveServers.size() ];
     for ( int i = 0; i < slaveServers.size(); i++ ) {
       SlaveServer slaveServer = slaveServers.get( i );
-      names[i] = slaveServer.getName();
+      names[ i ] = slaveServer.getName();
     }
     return names;
   }
 
   public synchronized int allocateServerSocket( String runId, int portRangeStart, String hostname,
-    String transformationName, String sourceSlaveName, String sourceStepName, String sourceStepCopy,
-    String targetSlaveName, String targetStepName, String targetStepCopy ) throws Exception {
+                                                String transformationName, String sourceSlaveName,
+                                                String sourceStepName, String sourceStepCopy,
+                                                String targetSlaveName, String targetStepName, String targetStepCopy )
+    throws Exception {
 
     // Look up the IP address of the given hostname
     // Only this way we'll be to allocate on the correct host.
@@ -805,29 +906,20 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
     service += "&" + AllocateServerSocketServlet.PARAM_ID + "=" + URLEncoder.encode( runId, "UTF-8" );
     service += "&" + AllocateServerSocketServlet.PARAM_HOSTNAME + "=" + address;
     service +=
-      "&"
-        + AllocateServerSocketServlet.PARAM_TRANSFORMATION_NAME + "="
+      "&" + AllocateServerSocketServlet.PARAM_TRANSFORMATION_NAME + "="
         + URLEncoder.encode( transformationName, "UTF-8" );
     service +=
       "&" + AllocateServerSocketServlet.PARAM_SOURCE_SLAVE + "=" + URLEncoder.encode( sourceSlaveName, "UTF-8" );
     service +=
-      "&"
-        + AllocateServerSocketServlet.PARAM_SOURCE_STEPNAME + "="
-        + URLEncoder.encode( sourceStepName, "UTF-8" );
+      "&" + AllocateServerSocketServlet.PARAM_SOURCE_STEPNAME + "=" + URLEncoder.encode( sourceStepName, "UTF-8" );
     service +=
-      "&"
-        + AllocateServerSocketServlet.PARAM_SOURCE_STEPCOPY + "="
-        + URLEncoder.encode( sourceStepCopy, "UTF-8" );
+      "&" + AllocateServerSocketServlet.PARAM_SOURCE_STEPCOPY + "=" + URLEncoder.encode( sourceStepCopy, "UTF-8" );
     service +=
       "&" + AllocateServerSocketServlet.PARAM_TARGET_SLAVE + "=" + URLEncoder.encode( targetSlaveName, "UTF-8" );
     service +=
-      "&"
-        + AllocateServerSocketServlet.PARAM_TARGET_STEPNAME + "="
-        + URLEncoder.encode( targetStepName, "UTF-8" );
+      "&" + AllocateServerSocketServlet.PARAM_TARGET_STEPNAME + "=" + URLEncoder.encode( targetStepName, "UTF-8" );
     service +=
-      "&"
-        + AllocateServerSocketServlet.PARAM_TARGET_STEPCOPY + "="
-        + URLEncoder.encode( targetStepCopy, "UTF-8" );
+      "&" + AllocateServerSocketServlet.PARAM_TARGET_STEPCOPY + "=" + URLEncoder.encode( targetStepCopy, "UTF-8" );
     service += "&xml=Y";
     String xml = execService( service );
     Document doc = XMLHandler.loadXMLString( xml );
@@ -869,7 +961,8 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
     return variables.environmentSubstitute( aString );
   }
 
-  public String fieldSubstitute( String aString, RowMetaInterface rowMeta, Object[] rowData ) throws KettleValueException {
+  public String fieldSubstitute( String aString, RowMetaInterface rowMeta, Object[] rowData )
+    throws KettleValueException {
     return variables.fieldSubstitute( aString, rowMeta, rowData );
   }
 
@@ -893,7 +986,7 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
     if ( !Const.isEmpty( variableName ) ) {
       String value = environmentSubstitute( variableName );
       if ( !Const.isEmpty( value ) ) {
-        return ValueMeta.convertStringToBoolean( value );
+        return ValueMetaString.convertStringToBoolean( value );
       }
     }
     return defaultValue;
@@ -960,30 +1053,50 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
   }
 
   /**
+   * Verify the name of the slave server and if required, change it if it already exists in the list of slave servers.
+   *
+   * @param slaveServers
+   *          the slave servers to check against.
+   * @param oldname
+   *          the old name of the slave server
+   * @return the new slave server name
+   */
+  public String verifyAndModifySlaveServerName( List<SlaveServer> slaveServers, String oldname ) {
+    String name = getName();
+    if ( name.equalsIgnoreCase( oldname ) ) {
+      return name; // nothing to see here: move along!
+    }
+
+    int nr = 2;
+    while ( SlaveServer.findSlaveServer( slaveServers, getName() ) != null ) {
+      setName( name + " " + nr );
+      nr++;
+    }
+    return getName();
+  }
+
+  /**
    * Sniff rows on a the slave server, return xml containing the row metadata and data.
    *
    * @param transName transformation name
-   * @param stepName step name
-   * @param copyNr step copy number
-   * @param lines lines number
-   * @param type step type
+   * @param stepName  step name
+   * @param copyNr    step copy number
+   * @param lines     lines number
+   * @param type      step type
    * @return xml with row metadata and data
    * @throws Exception
    */
   public String sniffStep( String transName, String stepName, String copyNr, int lines, String type ) throws Exception {
-    return execService( SniffStepServlet.CONTEXT_PATH
-        + "/?trans=" + URLEncoder.encode( transName, "UTF-8" ) + "&step="
-        + URLEncoder.encode( stepName, "UTF-8" ) + "&copynr=" + copyNr + "&type=" + type + "&lines=" + lines
-        + "&xml=Y" );
+    return execService( SniffStepServlet.CONTEXT_PATH + "/?trans=" + URLEncoder.encode( transName, "UTF-8" ) + "&step="
+      + URLEncoder.encode( stepName, "UTF-8" ) + "&copynr=" + copyNr + "&type=" + type + "&lines=" + lines + "&xml=Y" );
   }
 
   public long getNextSlaveSequenceValue( String slaveSequenceName, long incrementValue ) throws KettleException {
     try {
       String xml =
-        execService( NextSequenceValueServlet.CONTEXT_PATH
-          + "/" + "?" + NextSequenceValueServlet.PARAM_NAME + "="
-          + URLEncoder.encode( slaveSequenceName, "UTF-8" ) + "&" + NextSequenceValueServlet.PARAM_INCREMENT
-          + "=" + Long.toString( incrementValue ) );
+          execService( NextSequenceValueServlet.CONTEXT_PATH + "/" + "?" + NextSequenceValueServlet.PARAM_NAME + "="
+              + URLEncoder.encode( slaveSequenceName, "UTF-8" ) + "&" + NextSequenceValueServlet.PARAM_INCREMENT + "="
+              + Long.toString( incrementValue ) );
 
       Document doc = XMLHandler.loadXMLString( xml );
       Node seqNode = XMLHandler.getSubNode( doc, NextSequenceValueServlet.XML_TAG );
@@ -994,14 +1107,13 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
         throw new KettleException( errorString );
       }
       if ( Const.isEmpty( nextValueString ) ) {
-        throw new KettleException( "No value retrieved from slave sequence '"
-          + slaveSequenceName + "' on slave " + toString() );
+        throw new KettleException( "No value retrieved from slave sequence '" + slaveSequenceName + "' on slave "
+          + toString() );
       }
       long nextValue = Const.toLong( nextValueString, Long.MIN_VALUE );
       if ( nextValue == Long.MIN_VALUE ) {
-        throw new KettleException( "Incorrect value '"
-          + nextValueString + "' retrieved from slave sequence '" + slaveSequenceName + "' on slave "
-          + toString() );
+        throw new KettleException( "Incorrect value '" + nextValueString + "' retrieved from slave sequence '"
+          + slaveSequenceName + "' on slave " + toString() );
       }
 
       return nextValue;
@@ -1011,10 +1123,40 @@ public class SlaveServer extends ChangedFlag implements Cloneable, SharedObjectI
     }
   }
 
+  public SlaveServer getClient() {
+    String pHostName = getHostname();
+    String pPort = getPort();
+    String name = MessageFormat.format( "Dynamic slave [{0}:{1}]", pHostName, pPort );
+    SlaveServer client = new SlaveServer( name, pHostName, "" + pPort, getUsername(), getPassword() );
+    client.setSslMode( isSslMode() );
+    return client;
+  }
+
   /**
    * @return the changedDate
    */
   public Date getChangedDate() {
     return changedDate;
+  }
+
+  /**
+   * @param sslMode
+   */
+  public void setSslMode( boolean sslMode ) {
+    this.sslMode = sslMode;
+  }
+
+  /**
+   * @return the sslMode
+   */
+  public boolean isSslMode() {
+    return sslMode;
+  }
+
+  /**
+   * @return the sslConfig
+   */
+  public SslConfiguration getSslConfig() {
+    return sslConfig;
   }
 }

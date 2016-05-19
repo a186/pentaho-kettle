@@ -2,7 +2,7 @@
  *
  * Pentaho Data Integration
  *
- * Copyright (C) 2002-2013 by Pentaho : http://www.pentaho.com
+ * Copyright (C) 2002-2015 by Pentaho : http://www.pentaho.com
  *
  *******************************************************************************
  *
@@ -65,8 +65,20 @@ public class LoggingRegistry {
       LoggingObject loggingSource = new LoggingObject( object );
 
       LoggingObjectInterface found = findExistingLoggingSource( loggingSource );
-      if ( ( found != null ) && ( found.getParent() != null ) ) {
-        return found.getLogChannelId();
+      if ( found != null ) {
+        LoggingObjectInterface foundParent = found.getParent();
+        LoggingObjectInterface loggingSourceParent = loggingSource.getParent();
+        if ( foundParent != null && loggingSourceParent != null ) {
+          String foundParentLogChannelId = foundParent.getLogChannelId();
+          String sourceParentLogChannelId = loggingSourceParent.getLogChannelId();
+          if ( foundParentLogChannelId != null && sourceParentLogChannelId != null
+            && foundParentLogChannelId.equals( sourceParentLogChannelId ) ) {
+            String foundLogChannelId = found.getLogChannelId();
+            if ( foundLogChannelId != null ) {
+              return foundLogChannelId;
+            }
+          }
+        }
       }
 
       String logChannelId = UUID.randomUUID().toString();
@@ -182,7 +194,7 @@ public class LoggingRegistry {
   }
 
   public String dump( boolean includeGeneral ) {
-    StringBuffer out = new StringBuffer( 50000 );
+    StringBuilder out = new StringBuilder( 50000 );
     for ( LoggingObjectInterface o : this.map.values() ) {
       if ( ( includeGeneral ) || ( !o.getObjectType().equals( LoggingObjectType.GENERAL ) ) ) {
         out.append( o.getContainerObjectId() );

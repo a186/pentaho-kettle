@@ -23,7 +23,6 @@
 package org.pentaho.di.ui.repository.repositoryexplorer;
 
 import java.util.ArrayList;
-import java.util.Enumeration;
 import java.util.List;
 import java.util.ResourceBundle;
 
@@ -34,12 +33,14 @@ import org.pentaho.di.core.gui.SpoonFactory;
 import org.pentaho.di.core.variables.VariableSpace;
 import org.pentaho.di.i18n.BaseMessages;
 import org.pentaho.di.repository.IRepositoryService;
+import org.pentaho.di.repository.KettleRepositoryLostException;
 import org.pentaho.di.repository.Repository;
 import org.pentaho.di.ui.core.dialog.ErrorDialog;
 import org.pentaho.di.ui.repository.repositoryexplorer.controllers.MainController;
 import org.pentaho.di.ui.repository.repositoryexplorer.uisupport.IRepositoryExplorerUISupport;
 import org.pentaho.di.ui.spoon.Spoon;
 import org.pentaho.di.ui.spoon.SpoonPluginManager;
+import org.pentaho.di.ui.spoon.XulSpoonResourceBundle;
 import org.pentaho.di.ui.spoon.XulSpoonSettingsManager;
 import org.pentaho.di.ui.xul.KettleXulLoader;
 import org.pentaho.ui.xul.XulDomContainer;
@@ -62,27 +63,17 @@ public class RepositoryExplorer {
 
   private XulDomContainer container;
 
-  private ResourceBundle resourceBundle = new ResourceBundle() {
+  private boolean initialized = false;
 
-    @Override
-    public Enumeration<String> getKeys() {
-      return null;
-    }
-
-    @Override
-    protected Object handleGetObject( String key ) {
-      return BaseMessages.getString( CLZ, key );
-    }
-
-  };
+  private ResourceBundle resourceBundle = new XulSpoonResourceBundle( CLZ );
 
   // private Repository repository;
   public RepositoryExplorer( Shell shell, final Repository rep, RepositoryExplorerCallback callback,
     VariableSpace variableSpace ) throws XulException {
     KettleXulLoader xulLoader = new KettleXulLoader();
+    xulLoader.setIconsSize( 24, 24 );
     xulLoader.setOuterContext( shell );
     xulLoader.setSettingsManager( XulSpoonSettingsManager.getInstance() );
-    xulLoader.registerClassLoader( getClass().getClassLoader() );
     container =
       xulLoader.loadXul(
         "org/pentaho/di/ui/repository/repositoryexplorer/xul/explorer-layout.xul", resourceBundle );
@@ -112,14 +103,25 @@ public class RepositoryExplorer {
         Spoon.class, "Spoon.Error" ), e.getMessage(), e );
     }
     // Call the init method for all the Active UISupportController
+    KettleRepositoryLostException krle = null;
     for ( IRepositoryExplorerUISupport uiSupport : uiSupportList ) {
       try {
         uiSupport.initControllers( rep );
       } catch ( ControllerInitializationException e ) {
         log.error( resourceBundle.getString( "RepositoryExplorer.ErrorStartingXulApplication" ), e );
-        new ErrorDialog( ( (Spoon) SpoonFactory.getInstance() ).getShell(), BaseMessages.getString(
-          Spoon.class, "Spoon.Error" ), e.getMessage(), e );
+        krle = KettleRepositoryLostException.lookupStackStrace( e );
+        if ( krle == null ) {
+          new ErrorDialog( ( (Spoon) SpoonFactory.getInstance() ).getShell(), BaseMessages.getString(
+            Spoon.class, "Spoon.Error" ), e.getMessage(), e );
+        } else {
+          break;
+        }
       }
+    }
+
+    if ( krle != null ) {
+      dispose();
+      throw krle;
     }
 
     try {
@@ -129,6 +131,8 @@ public class RepositoryExplorer {
       new ErrorDialog( ( (Spoon) SpoonFactory.getInstance() ).getShell(), BaseMessages.getString(
         Spoon.class, "Spoon.Error" ), e.getMessage(), e );
     }
+
+    initialized = true;
   }
 
   public void show() {
@@ -140,5 +144,11 @@ public class RepositoryExplorer {
   public void dispose() {
     SwtDialog dialog = (SwtDialog) container.getDocumentRoot().getElementById( "repository-explorer-dialog" );
     dialog.dispose();
+    initialized = false;
   }
+
+  public boolean isInitialized() {
+    return initialized;
+  }
+
 }

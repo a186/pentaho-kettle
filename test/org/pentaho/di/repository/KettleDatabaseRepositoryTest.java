@@ -33,9 +33,9 @@ import java.util.List;
 
 import junit.framework.TestCase;
 
-import org.apache.commons.vfs.FileObject;
-import org.apache.commons.vfs.FileSelectInfo;
-import org.apache.commons.vfs.FileSelector;
+import org.apache.commons.vfs2.FileObject;
+import org.apache.commons.vfs2.FileSelectInfo;
+import org.apache.commons.vfs2.FileSelector;
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.KettleEnvironment;
 import org.pentaho.di.core.database.DatabaseMeta;
@@ -76,7 +76,15 @@ public class KettleDatabaseRepositoryTest extends TestCase {
       //
       repository.connect( "admin", "admin" );
       assertTrue( repository.isConnected() );
-
+      
+      // Test database save
+      DatabaseMeta dataBaseForSave = new DatabaseMeta("H2Test", "H2", "JDBC", null, filename, null, null, null );   
+      repository.save( dataBaseForSave, "User creates new database" );
+      //load new database from repository by generated id on save step
+      DatabaseMeta loadedDataBase = repository.loadDatabaseMeta( dataBaseForSave.getObjectId(), "User creates new database" );
+      
+      assertEquals("Database object before save and after load form database is diffenert", dataBaseForSave, loadedDataBase );
+      
       // Test loading the directory tree
       tree = repository.loadRepositoryDirectoryTree();
       assertNotNull( tree );
@@ -195,6 +203,40 @@ public class KettleDatabaseRepositoryTest extends TestCase {
       }
     } );
 
+    // test the storage of jobMeta attributes in the Kettle DB Repo
+    if ( filesList.size() > 0 ) {
+      FileObject file = filesList.get( 0 );
+      String jobFilename = file.getName().getPath();
+      System.out.println( "Storing/Loading/validating job attributes" );
+
+      // Load the JobMeta object...
+      //
+      JobMeta jobMeta = new JobMeta( jobFilename, repository );
+      // set some attributes
+      jobMeta.setAttribute( "group", "key", "value" );
+      jobMeta.setAttribute( "test-group", "test-key-1", "test-value" );
+      jobMeta.setAttribute( "test-group", "test-key-2", "test-value" );
+      jobMeta.setAttribute( "test-group", "test-key-3", "test-value-3" );
+
+      // Save it in the repository in the samples folder
+      //
+      jobMeta.setRepositoryDirectory( samplesDirectory );
+      repository.save( jobMeta, "unit testing" );
+      assertNotNull( jobMeta.getObjectId() );
+
+      // Load it back up again...
+      //
+      JobMeta repJobMeta = repository.loadJob( jobMeta.getObjectId(), null );
+      String value = repJobMeta.getAttribute( "group", "key" );
+      String value1 = repJobMeta.getAttribute( "test-group", "test-key-1" );
+      String value2 = repJobMeta.getAttribute( "test-group", "test-key-2" );
+      String value3 = repJobMeta.getAttribute( "test-group", "test-key-3" );
+      assertEquals( "value", value );
+      assertEquals( "test-value", value1 );
+      assertEquals( "test-value", value2 );
+      assertEquals( "test-value-3", value3 );
+    }
+    
     for ( FileObject file : filesList ) {
       String jobFilename = file.getName().getPath();
       System.out.println( "Storing/Loading/validating job '" + jobFilename + "'" );

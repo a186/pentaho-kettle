@@ -22,6 +22,10 @@
 
 package org.pentaho.di.ui.cluster.dialog;
 
+import java.util.Collection;
+import java.util.Collections;
+
+import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.CTabFolder;
 import org.eclipse.swt.custom.CTabItem;
@@ -36,6 +40,7 @@ import org.eclipse.swt.layout.FormData;
 import org.eclipse.swt.layout.FormLayout;
 import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
+import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Dialog;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Event;
@@ -52,9 +57,11 @@ import org.pentaho.di.ui.core.dialog.EnterTextDialog;
 import org.pentaho.di.ui.core.dialog.ErrorDialog;
 import org.pentaho.di.ui.core.gui.GUIResource;
 import org.pentaho.di.ui.core.gui.WindowProperty;
+import org.pentaho.di.ui.core.widget.PasswordTextVar;
 import org.pentaho.di.ui.core.widget.TextVar;
 import org.pentaho.di.ui.trans.step.BaseStepDialog;
-import org.pentaho.di.www.AddTransServlet;
+import org.pentaho.di.ui.util.DialogUtils;
+import org.pentaho.di.www.RegisterTransServlet;
 
 /**
  *
@@ -71,6 +78,8 @@ public class SlaveServerDialog extends Dialog {
 
   private SlaveServer slaveServer;
 
+  private Collection<SlaveServer> existingServers;
+
   private CTabFolder wTabFolder;
   private FormData fdTabFolder;
 
@@ -85,6 +94,7 @@ public class SlaveServerDialog extends Dialog {
   private Text wName;
   private TextVar wHostname, wPort, wWebAppName, wUsername, wPassword;
   private Button wMaster;
+  private Button wSSL;
 
   // Proxy
   private TextVar wProxyHost, wProxyPort, wNonProxyHosts;
@@ -101,13 +111,18 @@ public class SlaveServerDialog extends Dialog {
   private SlaveServer originalServer;
   private boolean ok;
 
-  public SlaveServerDialog( Shell par, SlaveServer slaveServer ) {
+  public SlaveServerDialog( Shell par, SlaveServer slaveServer, Collection<SlaveServer> existingServers ) {
     super( par, SWT.NONE );
     this.slaveServer = (SlaveServer) slaveServer.clone();
     this.slaveServer.shareVariablesWith( slaveServer );
     this.originalServer = slaveServer;
+    this.existingServers = existingServers;
     props = PropsUI.getInstance();
     ok = false;
+  }
+
+  public SlaveServerDialog( Shell par, SlaveServer slaveServer ) {
+    this( par, slaveServer, Collections.<SlaveServer>emptyList() );
   }
 
   public boolean open() {
@@ -328,9 +343,8 @@ public class SlaveServerDialog extends Dialog {
     fdlPassword.right = new FormAttachment( middle, -margin );
     wlPassword.setLayoutData( fdlPassword );
 
-    wPassword = new TextVar( slaveServer, wServiceComp, SWT.SINGLE | SWT.LEFT | SWT.BORDER );
+    wPassword = new PasswordTextVar( slaveServer, wServiceComp, SWT.SINGLE | SWT.LEFT | SWT.BORDER );
     props.setLook( wPassword );
-    wPassword.setEchoChar( '*' );
     wPassword.addModifyListener( lsMod );
     FormData fdPassword = new FormData();
     fdPassword.top = new FormAttachment( wUsername, margin );
@@ -355,6 +369,27 @@ public class SlaveServerDialog extends Dialog {
     fdMaster.left = new FormAttachment( middle, 0 );
     fdMaster.right = new FormAttachment( 95, 0 );
     wMaster.setLayoutData( fdMaster );
+
+    // Https
+    Control lastControl = wMaster;
+    Label wlSSL = new Label( wServiceComp, SWT.RIGHT );
+    wlSSL.setText( BaseMessages.getString( PKG, "SlaveServerDialog.UseSsl.Label" ) );
+    props.setLook( wlSSL );
+    FormData fd = new FormData();
+    fd.top = new FormAttachment( lastControl, margin );
+    fd.left = new FormAttachment( 0, 0 );
+    fd.right = new FormAttachment( middle, -margin );
+    wlSSL.setLayoutData( fd );
+    wlSSL.setVisible( false ); // future functional
+
+    wSSL = new Button( wServiceComp, SWT.CHECK );
+    props.setLook( wSSL );
+    FormData bfd = new FormData();
+    bfd.top = new FormAttachment( lastControl, margin );
+    bfd.left = new FormAttachment( middle, 0 );
+    bfd.right = new FormAttachment( 95, 0 );
+    wSSL.setLayoutData( bfd );
+    wSSL.setVisible( false ); // future functional
 
     fdServiceComp = new FormData();
     fdServiceComp.left = new FormAttachment( 0, 0 );
@@ -473,6 +508,8 @@ public class SlaveServerDialog extends Dialog {
 
     wMaster.setSelection( slaveServer.isMaster() );
 
+    wSSL.setSelection( slaveServer.isSslMode() );
+
     wName.setFocus();
   }
 
@@ -483,6 +520,21 @@ public class SlaveServerDialog extends Dialog {
 
   public void ok() {
     getInfo();
+
+    if ( !slaveServer.getName().equals( originalServer.getName() ) ) {
+      if ( DialogUtils.objectWithTheSameNameExists( slaveServer, existingServers ) ) {
+        String title = BaseMessages.getString( PKG, "SlaveServerDialog.SlaveServerNameExists.Title" );
+        String message =
+            BaseMessages.getString( PKG, "SlaveServerDialog.SlaveServerNameExists", slaveServer.getName() );
+        String okButton = BaseMessages.getString( PKG, "System.Button.OK" );
+        MessageDialog dialog =
+            new MessageDialog( shell, title, null, message, MessageDialog.ERROR, new String[] { okButton }, 0 );
+
+        dialog.open();
+        return;
+      }
+    }
+
     originalServer.setName( slaveServer.getName() );
     originalServer.setHostname( slaveServer.getHostname() );
     originalServer.setPort( slaveServer.getPort() );
@@ -495,6 +547,8 @@ public class SlaveServerDialog extends Dialog {
     originalServer.setNonProxyHosts( slaveServer.getNonProxyHosts() );
 
     originalServer.setMaster( slaveServer.isMaster() );
+
+    originalServer.setSslMode( slaveServer.isSslMode() );
 
     originalServer.setChanged();
 
@@ -517,6 +571,8 @@ public class SlaveServerDialog extends Dialog {
     slaveServer.setNonProxyHosts( wNonProxyHosts.getText() );
 
     slaveServer.setMaster( wMaster.getSelection() );
+
+    slaveServer.setSslMode( wSSL.getSelection() );
   }
 
   public void test() {
@@ -525,11 +581,11 @@ public class SlaveServerDialog extends Dialog {
 
       String xml = "<sample/>";
 
-      String reply = slaveServer.sendXML( xml, AddTransServlet.CONTEXT_PATH );
+      String reply = slaveServer.sendXML( xml, RegisterTransServlet.CONTEXT_PATH );
 
       String message =
         BaseMessages.getString( PKG, "SlaveServer.Replay.Info1" )
-          + slaveServer.constructUrl( AddTransServlet.CONTEXT_PATH ) + Const.CR
+          + slaveServer.constructUrl( RegisterTransServlet.CONTEXT_PATH ) + Const.CR
           + BaseMessages.getString( PKG, "SlaveServer.Replay.Info2" ) + Const.CR + Const.CR;
       message += xml;
       message += Const.CR + Const.CR;

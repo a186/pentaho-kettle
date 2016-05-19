@@ -2,7 +2,7 @@
  *
  * Pentaho Data Integration
  *
- * Copyright (C) 2002-2013 by Pentaho : http://www.pentaho.com
+ * Copyright (C) 2002-2015 by Pentaho : http://www.pentaho.com
  *
  *******************************************************************************
  *
@@ -22,11 +22,8 @@
 
 package org.pentaho.di.job.entries.ftp;
 
-import static org.pentaho.di.job.entry.validator.AndValidator.putValidators;
-import static org.pentaho.di.job.entry.validator.JobEntryValidatorUtils.andValidator;
-import static org.pentaho.di.job.entry.validator.JobEntryValidatorUtils.fileExistsValidator;
-import static org.pentaho.di.job.entry.validator.JobEntryValidatorUtils.notBlankValidator;
-import static org.pentaho.di.job.entry.validator.JobEntryValidatorUtils.notNullValidator;
+import org.pentaho.di.job.entry.validator.AndValidator;
+import org.pentaho.di.job.entry.validator.JobEntryValidatorUtils;
 
 import java.io.File;
 import java.io.IOException;
@@ -38,7 +35,8 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import org.apache.commons.vfs.FileObject;
+import com.google.common.annotations.VisibleForTesting;
+import org.apache.commons.vfs2.FileObject;
 import org.pentaho.di.cluster.SlaveServer;
 import org.pentaho.di.core.CheckResultInterface;
 import org.pentaho.di.core.Const;
@@ -225,7 +223,7 @@ public class JobEntryFTP extends JobEntryBase implements Cloneable, JobEntryInte
   }
 
   public String getXML() {
-    StringBuffer retval = new StringBuffer( 128 );
+    StringBuilder retval = new StringBuilder( 650 ); // 528 chars in spaces and tags alone
 
     retval.append( super.getXML() );
     retval.append( "      " ).append( XMLHandler.addTagValue( "port", port ) );
@@ -1066,8 +1064,6 @@ public class JobEntryFTP extends JobEntryBase implements Cloneable, JobEntryInte
         // Get all the files in the current directory...
         FTPFile[] ftpFiles = ftpclient.dirDetails( null );
 
-        // if(isDetailed()) logDetailed(BaseMessages.getString(PKG, "JobEntryFTP.FoundNFiles",
-        // String.valueOf(filelist.length)));
         if ( isDetailed() ) {
           logDetailed( BaseMessages.getString( PKG, "JobEntryFTP.FoundNFiles", String.valueOf( ftpFiles.length ) ) );
         }
@@ -1317,7 +1313,8 @@ public class JobEntryFTP extends JobEntryBase implements Cloneable, JobEntryInte
    *
    * @return the calculated target filename
    */
-  private String returnTargetFilename( String filename ) {
+  @VisibleForTesting
+  String returnTargetFilename( String filename ) {
     String retval = null;
     // Replace possible environment variables...
     if ( filename != null ) {
@@ -1331,6 +1328,8 @@ public class JobEntryFTP extends JobEntryBase implements Cloneable, JobEntryInte
     if ( lastindexOfDot == -1 ) {
       lastindexOfDot = lenstring;
     }
+
+    String fileExtension = retval.substring( lastindexOfDot, lenstring );
 
     if ( isAddDateBeforeExtension() ) {
       retval = retval.substring( 0, lastindexOfDot );
@@ -1357,7 +1356,7 @@ public class JobEntryFTP extends JobEntryBase implements Cloneable, JobEntryInte
     }
 
     if ( isAddDateBeforeExtension() ) {
-      retval += retval.substring( lastindexOfDot, lenstring );
+      retval += fileExtension;
     }
 
     // Add foldername to filename
@@ -1441,11 +1440,15 @@ public class JobEntryFTP extends JobEntryBase implements Cloneable, JobEntryInte
 
   public void check( List<CheckResultInterface> remarks, JobMeta jobMeta, VariableSpace space,
     Repository repository, IMetaStore metaStore ) {
-    andValidator().validate( this, "serverName", remarks, putValidators( notBlankValidator() ) );
-    andValidator().validate(
-      this, "targetDirectory", remarks, putValidators( notBlankValidator(), fileExistsValidator() ) );
-    andValidator().validate( this, "userName", remarks, putValidators( notBlankValidator() ) );
-    andValidator().validate( this, "password", remarks, putValidators( notNullValidator() ) );
+    JobEntryValidatorUtils.andValidator().validate( this, "serverName", remarks,
+        AndValidator.putValidators( JobEntryValidatorUtils.notBlankValidator() ) );
+    JobEntryValidatorUtils.andValidator().validate(
+      this, "targetDirectory", remarks, AndValidator.putValidators( JobEntryValidatorUtils.notBlankValidator(),
+          JobEntryValidatorUtils.fileExistsValidator() ) );
+    JobEntryValidatorUtils.andValidator().validate( this, "userName", remarks,
+        AndValidator.putValidators( JobEntryValidatorUtils.notBlankValidator() ) );
+    JobEntryValidatorUtils.andValidator().validate( this, "password", remarks,
+        AndValidator.putValidators( JobEntryValidatorUtils.notNullValidator() ) );
   }
 
   public List<ResourceReference> getResourceDependencies( JobMeta jobMeta ) {

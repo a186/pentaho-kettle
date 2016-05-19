@@ -2,7 +2,7 @@
  *
  * Pentaho Data Integration
  *
- * Copyright (C) 2002-2013 by Pentaho : http://www.pentaho.com
+ * Copyright (C) 2002-2016 by Pentaho : http://www.pentaho.com
  *
  *******************************************************************************
  *
@@ -101,7 +101,7 @@ import org.pentaho.di.trans.TransMeta;
  *
  */
 public class KettleDatabaseRepository extends KettleDatabaseRepositoryBase {
-  // private static Class<?> PKG = Repository.class; // for i18n purposes, needed by Translator2!! 
+  // private static Class<?> PKG = Repository.class; // for i18n purposes, needed by Translator2!!
 
   public KettleDatabaseRepositoryTransDelegate transDelegate;
   public KettleDatabaseRepositoryJobDelegate jobDelegate;
@@ -213,6 +213,69 @@ public class KettleDatabaseRepository extends KettleDatabaseRepositoryBase {
     }
   }
 
+  @Override public boolean test() {
+    try {
+      getDatabase().connect();
+    } catch ( KettleDatabaseException kde ) {
+      return false;
+    }
+    return true;
+  }
+
+  @Override public void create() {
+    if ( repositoryMeta.getConnection() != null ) {
+      if ( repositoryMeta.getConnection().getAccessType() == DatabaseMeta.TYPE_ACCESS_ODBC ) {
+        // This will change in a future story
+        log.logDebug( "ODBC type is not advised for repository use" );
+      }
+
+      try {
+        if ( !getDatabaseMeta().getDatabaseInterface().supportsRepository() ) {
+          // show error about not being valid
+          log.logError( "This database type does not support being a repository" );
+        }
+
+        connectionDelegate.connect( true, true );
+        boolean upgrade = false;
+
+        try {
+          String userTableName = getDatabaseMeta().quoteField( KettleDatabaseRepository.TABLE_R_USER );
+          upgrade = getDatabase().checkTableExists( userTableName );
+          if ( upgrade ) {
+            // This will change in future story
+            log.logDebug( "Database upgrade will now take place" );
+          }
+        } catch ( KettleDatabaseException dbe ) {
+          // Roll back the connection: this is required for certain databases like PGSQL
+          // Otherwise we can't execute any other DDL statement.
+          //
+          rollback();
+
+          // Don't show an error anymore, just go ahead and propose to create the repository!
+        }
+
+        String pwd = "admin";
+        if ( pwd != null ) {
+          try {
+            // authenticate as admin before upgrade
+            // disconnect before connecting, we connected above already
+            //
+            disconnect();
+            connect( "admin", pwd, true );
+          } catch ( KettleException e ) {
+            log.logError( "Invalid user credentials" );
+          }
+        }
+
+        createRepositorySchema( null, upgrade, new ArrayList<String>(), false );
+
+        disconnect();
+      } catch ( KettleException ke ) {
+        log.logError( "An error has occurred creating a repository" );
+      }
+    }
+  }
+
   /**
    * Add the repository service to the map and add the interface to the list
    *
@@ -291,10 +354,18 @@ public class KettleDatabaseRepository extends KettleDatabaseRepositoryBase {
     }
   }
 
-  public synchronized ObjectId renameTransformation( ObjectId id_transformation,
-    RepositoryDirectoryInterface newDir, String newName ) throws KettleException {
+  public ObjectId renameTransformation( ObjectId id_transformation, RepositoryDirectoryInterface newDir,
+      String newName ) throws KettleException {
+    return renameTransformation( id_transformation, null, newDir, newName );
+  }
+
+  public synchronized ObjectId renameTransformation( ObjectId id_transformation, String versionComment,
+      RepositoryDirectoryInterface newDir, String newName ) throws KettleException {
     securityProvider.validateAction( RepositoryOperation.MODIFY_TRANSFORMATION );
     transDelegate.renameTransformation( id_transformation, newDir, newName );
+    if ( !Const.isEmpty( versionComment ) ) {
+      insertLogEntry( versionComment );
+    }
     return id_transformation; // The same in our case.
   }
 
@@ -331,9 +402,18 @@ public class KettleDatabaseRepository extends KettleDatabaseRepositoryBase {
     }
   }
 
-  public synchronized ObjectId renameJob( ObjectId id_job, RepositoryDirectoryInterface dir, String newname ) throws KettleException {
+  public ObjectId renameJob( ObjectId id_job, RepositoryDirectoryInterface dir, String newname )
+    throws KettleException {
+    return renameJob( id_job, null, dir, newname );
+  }
+
+  public synchronized ObjectId renameJob( ObjectId id_job, String versionComment, RepositoryDirectoryInterface dir,
+    String newname ) throws KettleException {
     securityProvider.validateAction( RepositoryOperation.MODIFY_TRANSFORMATION );
     jobDelegate.renameJob( id_job, dir, newname );
+    if ( !Const.isEmpty( versionComment ) ) {
+      insertLogEntry( versionComment );
+    }
     return id_job; // Same in this case
   }
 
@@ -1356,7 +1436,7 @@ public class KettleDatabaseRepository extends KettleDatabaseRepositoryBase {
         + quote( KettleDatabaseRepository.FIELD_TRANS_SLAVE_ID_SLAVE ) + " = ? ", id_slave );
       commit();
     } else {
-      StringBuffer message = new StringBuffer();
+      StringBuilder message = new StringBuilder( 100 );
 
       if ( transList.length > 0 ) {
         message.append( "Slave used by the following transformations:" ).append( Const.CR );
@@ -1730,7 +1810,14 @@ public class KettleDatabaseRepository extends KettleDatabaseRepositoryBase {
   }
 
   public ObjectId getDatabaseID( String name ) throws KettleException {
-    return databaseDelegate.getDatabaseID( name );
+    ObjectId exactMatch = databaseDelegate.getDatabaseID( name );
+    if ( exactMatch == null ) {
+      // look for a database
+      DatabaseMeta database = DatabaseMeta.findDatabase( getDatabases(), name );
+      return ( database == null ) ? null : database.getObjectId();
+    } else {
+      return exactMatch;
+    }
   }
 
   public ObjectId getJobId( String name, RepositoryDirectoryInterface repositoryDirectory ) throws KettleException {
@@ -1908,31 +1995,29 @@ public class KettleDatabaseRepository extends KettleDatabaseRepositoryBase {
   public RepositoryObject getObjectInformation( ObjectId objectId, RepositoryObjectType objectType ) throws KettleException {
     try {
 
+      String name, description, modifiedUser;
+      Date modifiedDate;
+      RepositoryDirectoryInterface directory;
+      long dirId;
       switch ( objectType ) {
         case TRANSFORMATION: {
           RowMetaAndData row = transDelegate.getTransformation( objectId );
-          String name = row.getString( KettleDatabaseRepository.FIELD_TRANSFORMATION_NAME, null );
-          String description = row.getString( KettleDatabaseRepository.FIELD_TRANSFORMATION_DESCRIPTION, null );
-          String modifiedUser = row.getString( KettleDatabaseRepository.FIELD_TRANSFORMATION_MODIFIED_USER, "-" );
-          Date modifiedDate = row.getDate( KettleDatabaseRepository.FIELD_TRANSFORMATION_MODIFIED_DATE, null );
-          long dirId = row.getInteger( KettleDatabaseRepository.FIELD_TRANSFORMATION_ID_DIRECTORY, 0 );
-          RepositoryDirectoryInterface directory =
-            loadRepositoryDirectoryTree().findDirectory( new LongObjectId( dirId ) );
-          return new RepositoryObject(
-            objectId, name, directory, modifiedUser, modifiedDate, objectType, description, false );
+          name = row.getString( KettleDatabaseRepository.FIELD_TRANSFORMATION_NAME, null );
+          description = row.getString( KettleDatabaseRepository.FIELD_TRANSFORMATION_DESCRIPTION, null );
+          modifiedUser = row.getString( KettleDatabaseRepository.FIELD_TRANSFORMATION_MODIFIED_USER, "-" );
+          modifiedDate = row.getDate( KettleDatabaseRepository.FIELD_TRANSFORMATION_MODIFIED_DATE, null );
+          dirId = row.getInteger( KettleDatabaseRepository.FIELD_TRANSFORMATION_ID_DIRECTORY, 0 );
+          break;
         }
 
         case JOB: {
           RowMetaAndData row = jobDelegate.getJob( objectId );
-          String name = row.getString( KettleDatabaseRepository.FIELD_JOB_NAME, null );
-          String description = row.getString( KettleDatabaseRepository.FIELD_JOB_DESCRIPTION, null );
-          String modifiedUser = row.getString( KettleDatabaseRepository.FIELD_JOB_MODIFIED_USER, "-" );
-          Date modifiedDate = row.getDate( KettleDatabaseRepository.FIELD_JOB_MODIFIED_DATE, null );
-          long dirId = row.getInteger( KettleDatabaseRepository.FIELD_JOB_ID_DIRECTORY, 0 );
-          RepositoryDirectoryInterface directory =
-            loadRepositoryDirectoryTree().findDirectory( new LongObjectId( dirId ) );
-          return new RepositoryObject(
-            objectId, name, directory, modifiedUser, modifiedDate, objectType, description, false );
+          name = row.getString( KettleDatabaseRepository.FIELD_JOB_NAME, null );
+          description = row.getString( KettleDatabaseRepository.FIELD_JOB_DESCRIPTION, null );
+          modifiedUser = row.getString( KettleDatabaseRepository.FIELD_JOB_MODIFIED_USER, "-" );
+          modifiedDate = row.getDate( KettleDatabaseRepository.FIELD_JOB_MODIFIED_DATE, null );
+          dirId = row.getInteger( KettleDatabaseRepository.FIELD_JOB_ID_DIRECTORY, 0 );
+          break;
         }
         default:
           throw new KettleException( "Object type "
@@ -1940,6 +2025,11 @@ public class KettleDatabaseRepository extends KettleDatabaseRepositoryBase {
             + " was specified.  Only information from transformations and jobs can be retrieved at this time." );
           // Nothing matches, return null
       }
+
+      boolean isDeleted = ( name == null );
+      directory = loadRepositoryDirectoryTree().findDirectory( new LongObjectId( dirId ) );
+      return new RepositoryObject(
+        objectId, name, directory, modifiedUser, modifiedDate, objectType, description, isDeleted );
     } catch ( Exception e ) {
       throw new KettleException( "Unable to get object information for object with id=" + objectId, e );
     }

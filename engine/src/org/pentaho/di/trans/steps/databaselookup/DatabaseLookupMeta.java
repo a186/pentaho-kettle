@@ -22,17 +22,17 @@
 
 package org.pentaho.di.trans.steps.databaselookup;
 
-import java.util.List;
-
 import org.pentaho.di.core.CheckResult;
 import org.pentaho.di.core.CheckResultInterface;
 import org.pentaho.di.core.Const;
+import org.pentaho.di.core.ProvidesModelerMeta;
 import org.pentaho.di.core.database.Database;
 import org.pentaho.di.core.database.DatabaseMeta;
 import org.pentaho.di.core.exception.KettleDatabaseException;
 import org.pentaho.di.core.exception.KettleException;
 import org.pentaho.di.core.exception.KettleStepException;
 import org.pentaho.di.core.exception.KettleXMLException;
+import org.pentaho.di.core.row.RowMeta;
 import org.pentaho.di.core.row.RowMetaInterface;
 import org.pentaho.di.core.row.ValueMeta;
 import org.pentaho.di.core.row.ValueMetaInterface;
@@ -54,7 +54,11 @@ import org.pentaho.di.trans.step.StepMetaInterface;
 import org.pentaho.metastore.api.IMetaStore;
 import org.w3c.dom.Node;
 
-public class DatabaseLookupMeta extends BaseStepMeta implements StepMetaInterface {
+import java.util.Arrays;
+import java.util.List;
+
+public class DatabaseLookupMeta extends BaseStepMeta implements StepMetaInterface,
+    ProvidesModelerMeta {
   private static Class<?> PKG = DatabaseLookupMeta.class; // for i18n purposes, needed by Translator2!!
 
   public static final String[] conditionStrings = new String[] {
@@ -161,6 +165,10 @@ public class DatabaseLookupMeta extends BaseStepMeta implements StepMetaInterfac
    */
   public DatabaseMeta getDatabaseMeta() {
     return databaseMeta;
+  }
+
+  @Override public String getTableName() {
+    return tablename;
   }
 
   /**
@@ -362,19 +370,15 @@ public class DatabaseLookupMeta extends BaseStepMeta implements StepMetaInterfac
 
     retval.allocate( nrkeys, nrvalues );
 
-    for ( int i = 0; i < nrkeys; i++ ) {
-      retval.streamKeyField1[i] = streamKeyField1[i];
-      retval.tableKeyField[i] = tableKeyField[i];
-      retval.keyCondition[i] = keyCondition[i];
-      retval.streamKeyField2[i] = streamKeyField2[i];
-    }
+    System.arraycopy( streamKeyField1, 0, retval.streamKeyField1, 0, nrkeys );
+    System.arraycopy( tableKeyField, 0, retval.tableKeyField, 0, nrkeys );
+    System.arraycopy( keyCondition, 0, retval.keyCondition, 0, nrkeys );
+    System.arraycopy( streamKeyField2, 0, retval.streamKeyField2, 0, nrkeys );
 
-    for ( int i = 0; i < nrvalues; i++ ) {
-      retval.returnValueField[i] = returnValueField[i];
-      retval.returnValueNewName[i] = returnValueNewName[i];
-      retval.returnValueDefault[i] = returnValueDefault[i];
-      retval.returnValueDefaultType[i] = returnValueDefaultType[i];
-    }
+    System.arraycopy( returnValueField, 0, retval.returnValueField, 0, nrvalues );
+    System.arraycopy( returnValueNewName, 0, retval.returnValueNewName, 0, nrvalues );
+    System.arraycopy( returnValueDefault, 0, retval.returnValueDefault, 0, nrvalues );
+    System.arraycopy( returnValueDefaultType, 0, retval.returnValueDefaultType, 0, nrvalues );
 
     return retval;
   }
@@ -472,13 +476,12 @@ public class DatabaseLookupMeta extends BaseStepMeta implements StepMetaInterfac
   }
 
   public void getFields( RowMetaInterface row, String name, RowMetaInterface[] info, StepMeta nextStep,
-    VariableSpace space, Repository repository, IMetaStore metaStore ) throws KettleStepException {
-    if ( Const.isEmpty( info ) || info[0] == null ) // null or length 0 : no info from database
-    {
+      VariableSpace space, Repository repository, IMetaStore metaStore ) throws KettleStepException {
+    if ( Const.isEmpty( info ) || info[0] == null ) { // null or length 0 : no info from database
       for ( int i = 0; i < getReturnValueNewName().length; i++ ) {
         try {
           ValueMetaInterface v =
-            ValueMetaFactory.createValueMeta( getReturnValueNewName()[i], getReturnValueDefaultType()[i] );
+              ValueMetaFactory.createValueMeta( getReturnValueNewName()[i], getReturnValueDefaultType()[i] );
           v.setOrigin( name );
           row.addValueMeta( v );
         } catch ( Exception e ) {
@@ -499,10 +502,10 @@ public class DatabaseLookupMeta extends BaseStepMeta implements StepMetaInterfac
   }
 
   public String getXML() {
-    StringBuffer retval = new StringBuffer( 500 );
+    StringBuilder retval = new StringBuilder( 500 );
 
     retval
-      .append( "    " ).append(
+        .append( "    " ).append(
         XMLHandler.addTagValue( "connection", databaseMeta == null ? "" : databaseMeta.getName() ) );
     retval.append( "    " ).append( XMLHandler.addTagValue( "cache", cached ) );
     retval.append( "    " ).append( XMLHandler.addTagValue( "cache_load_all", loadingAllDataInCache ) );
@@ -529,7 +532,7 @@ public class DatabaseLookupMeta extends BaseStepMeta implements StepMetaInterfac
       retval.append( "        " ).append( XMLHandler.addTagValue( "rename", returnValueNewName[i] ) );
       retval.append( "        " ).append( XMLHandler.addTagValue( "default", returnValueDefault[i] ) );
       retval.append( "        " ).append(
-        XMLHandler.addTagValue( "type", ValueMeta.getTypeDesc( returnValueDefaultType[i] ) ) );
+          XMLHandler.addTagValue( "type", ValueMeta.getTypeDesc( returnValueDefaultType[i] ) ) );
       retval.append( "      </value>" ).append( Const.CR );
     }
 
@@ -600,7 +603,7 @@ public class DatabaseLookupMeta extends BaseStepMeta implements StepMetaInterfac
         rep.saveStepAttribute( id_transformation, id_step, i, "return_value_rename", returnValueNewName[i] );
         rep.saveStepAttribute( id_transformation, id_step, i, "return_value_default", returnValueDefault[i] );
         rep.saveStepAttribute( id_transformation, id_step, i, "return_value_type", ValueMeta
-          .getTypeDesc( returnValueDefaultType[i] ) );
+            .getTypeDesc( returnValueDefaultType[i] ) );
       }
 
       // Also, save the step-database relationship!
@@ -616,8 +619,8 @@ public class DatabaseLookupMeta extends BaseStepMeta implements StepMetaInterfac
   }
 
   public void check( List<CheckResultInterface> remarks, TransMeta transMeta, StepMeta stepMeta,
-    RowMetaInterface prev, String[] input, String[] output, RowMetaInterface info, VariableSpace space,
-    Repository repository, IMetaStore metaStore ) {
+      RowMetaInterface prev, String[] input, String[] output, RowMetaInterface info, VariableSpace space,
+      Repository repository, IMetaStore metaStore ) {
     CheckResult cr;
     String error_message = "";
 
@@ -635,7 +638,7 @@ public class DatabaseLookupMeta extends BaseStepMeta implements StepMetaInterfac
           error_message = "";
 
           String schemaTable =
-            databaseMeta.getQuotedSchemaTableCombination( db.environmentSubstitute( schemaName ), db
+              databaseMeta.getQuotedSchemaTableCombination( db.environmentSubstitute( schemaName ), db
               .environmentSubstitute( tablename ) );
           RowMetaInterface r = db.getTableFields( schemaTable );
           if ( r != null ) {
@@ -773,7 +776,7 @@ public class DatabaseLookupMeta extends BaseStepMeta implements StepMetaInterfac
         fields = db.getTableFields( schemaTable );
       } catch ( KettleDatabaseException dbe ) {
         logError( BaseMessages.getString( PKG, "DatabaseLookupMeta.ERROR0004.ErrorGettingTableFields" )
-          + dbe.getMessage() );
+            + dbe.getMessage() );
       } finally {
         db.disconnect();
       }
@@ -782,7 +785,7 @@ public class DatabaseLookupMeta extends BaseStepMeta implements StepMetaInterfac
   }
 
   public StepInterface getStep( StepMeta stepMeta, StepDataInterface stepDataInterface, int cnr,
-    TransMeta transMeta, Trans trans ) {
+      TransMeta transMeta, Trans trans ) {
     return new DatabaseLookup( stepMeta, stepDataInterface, cnr, transMeta, trans );
   }
 
@@ -791,13 +794,13 @@ public class DatabaseLookupMeta extends BaseStepMeta implements StepMetaInterfac
   }
 
   public void analyseImpact( List<DatabaseImpact> impact, TransMeta transMeta, StepMeta stepinfo,
-    RowMetaInterface prev, String[] input, String[] output, RowMetaInterface info, Repository repository,
-    IMetaStore metaStore ) {
+      RowMetaInterface prev, String[] input, String[] output, RowMetaInterface info, Repository repository,
+      IMetaStore metaStore ) {
     // The keys are read-only...
     for ( int i = 0; i < streamKeyField1.length; i++ ) {
       ValueMetaInterface v = prev.searchValueMeta( streamKeyField1[i] );
       DatabaseImpact ii =
-        new DatabaseImpact(
+          new DatabaseImpact(
           DatabaseImpact.TYPE_IMPACT_READ, transMeta.getName(), stepinfo.getName(), databaseMeta
             .getDatabaseName(), tablename, tableKeyField[i], streamKeyField1[i], v != null
             ? v.getOrigin() : "?", "", BaseMessages.getString( PKG, "DatabaseLookupMeta.Impact.Key" ) );
@@ -807,7 +810,7 @@ public class DatabaseLookupMeta extends BaseStepMeta implements StepMetaInterfac
     // The Return fields are read-only too...
     for ( int i = 0; i < returnValueField.length; i++ ) {
       DatabaseImpact ii =
-        new DatabaseImpact(
+          new DatabaseImpact(
           DatabaseImpact.TYPE_IMPACT_READ, transMeta.getName(), stepinfo.getName(),
           databaseMeta.getDatabaseName(), tablename, returnValueField[i], "", "", "",
           BaseMessages.getString( PKG, "DatabaseLookupMeta.Impact.ReturnValue" ) );
@@ -845,6 +848,10 @@ public class DatabaseLookupMeta extends BaseStepMeta implements StepMetaInterfac
     return schemaName;
   }
 
+  @Override public String getMissingDatabaseConnectionInformationMessage() {
+    return null;
+  }
+
   /**
    * @param schemaName
    *          the schemaName to set
@@ -870,5 +877,17 @@ public class DatabaseLookupMeta extends BaseStepMeta implements StepMetaInterfac
    */
   public void setLoadingAllDataInCache( boolean loadingAllDataInCache ) {
     this.loadingAllDataInCache = loadingAllDataInCache;
+  }
+
+  @Override public RowMeta getRowMeta( StepDataInterface stepData ) {
+    return (RowMeta) ( (DatabaseLookupData) stepData ).returnMeta;
+  }
+
+  @Override public List<String> getDatabaseFields() {
+    return Arrays.asList( returnValueField );
+  }
+
+  @Override public List<String> getStreamFields() {
+    return Arrays.asList( returnValueNewName );
   }
 }

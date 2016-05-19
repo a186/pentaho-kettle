@@ -77,6 +77,14 @@ public class DimensionLookup extends BaseStep implements StepInterface {
     super( stepMeta, stepDataInterface, copyNr, transMeta, trans );
   }
 
+  protected void setMeta( DimensionLookupMeta meta ) {
+    this.meta = meta;
+  }
+
+  protected void setData( DimensionLookupData data ) {
+    this.data = data;
+  }
+
   private void setTechKeyCreation( int method ) {
     techKeyCreation = method;
   }
@@ -418,7 +426,7 @@ public class DimensionLookup extends BaseStep implements StepInterface {
       lookupRow[meta.getKeyStream().length] = valueDate; // ? >= date_from
       lookupRow[meta.getKeyStream().length + 1] = valueDate; // ? < date_to
 
-      if ( log.isDebug() ) {
+      if ( isDebug() ) {
         logDebug( BaseMessages.getString( PKG, "DimensionLookup.Log.LookupRow" )
           + data.lookupRowMeta.getString( lookupRow ) );
       }
@@ -476,7 +484,7 @@ public class DimensionLookup extends BaseStep implements StepInterface {
       // The dimension entry was not found, we need to add it!
       //
       if ( returnRow == null ) {
-        if ( log.isRowLevel() ) {
+        if ( isRowLevel() ) {
           logRowlevel( BaseMessages.getString( PKG, "DimensionLookup.Log.NoDimensionEntryFound" )
             + lookupRowMeta.getString( lookupRow ) + ")" );
         }
@@ -513,7 +521,7 @@ public class DimensionLookup extends BaseStep implements StepInterface {
           case CREATION_METHOD_SEQUENCE:
             technicalKey =
               data.db.getNextSequenceValue( data.realSchemaName, meta.getSequenceName(), meta.getKeyField() );
-            if ( technicalKey != null && log.isRowLevel() ) {
+            if ( technicalKey != null && isRowLevel() ) {
               logRowlevel( BaseMessages.getString( PKG, "DimensionLookup.Log.FoundNextSequence" )
                 + technicalKey.toString() );
             }
@@ -550,7 +558,7 @@ public class DimensionLookup extends BaseStep implements StepInterface {
          * // put it in the cache... if (values!=null) { addToCache(lookupRow, values); } }
          */
 
-        if ( log.isRowLevel() ) {
+        if ( isRowLevel() ) {
           logRowlevel( BaseMessages.getString( PKG, "DimensionLookup.Log.AddedDimensionEntry" )
             + data.returnRowMeta.getString( returnRow ) );
         }
@@ -558,7 +566,7 @@ public class DimensionLookup extends BaseStep implements StepInterface {
         //
         // The entry was found: do we need to insert, update or both?
         //
-        if ( log.isRowLevel() ) {
+        if ( isRowLevel() ) {
           logRowlevel( BaseMessages.getString( PKG, "DimensionLookup.Log.DimensionEntryFound" )
             + data.returnRowMeta.getString( returnRow ) );
         }
@@ -658,7 +666,7 @@ public class DimensionLookup extends BaseStep implements StepInterface {
               punch = true;
             }
 
-            if ( log.isRowLevel() ) {
+            if ( isRowLevel() ) {
               logRowlevel( BaseMessages
                 .getString(
                   PKG,
@@ -674,7 +682,7 @@ public class DimensionLookup extends BaseStep implements StepInterface {
         //
         if ( !insert ) { // Just an update of row at key = valueKey
           if ( !identical ) {
-            if ( log.isRowLevel() ) {
+            if ( isRowLevel() ) {
               logRowlevel( BaseMessages.getString( PKG, "DimensionLookup.Log.UpdateRowWithValues" )
                 + data.inputRowMeta.getString( row ) );
             }
@@ -691,14 +699,14 @@ public class DimensionLookup extends BaseStep implements StepInterface {
               addToCache( lookupRow, values );
             }
           } else {
-            if ( log.isRowLevel() ) {
+            if ( isRowLevel() ) {
               logRowlevel( BaseMessages.getString( PKG, "DimensionLookup.Log.SkipLine" ) );
             }
             // Don't do anything, everything is file in de dimension.
             incrementLinesSkipped();
           }
         } else {
-          if ( log.isRowLevel() ) {
+          if ( isRowLevel() ) {
             logRowlevel( BaseMessages.getString( PKG, "DimensionLookup.Log.InsertNewVersion" )
               + technicalKey.toString() );
           }
@@ -718,7 +726,7 @@ public class DimensionLookup extends BaseStep implements StepInterface {
             && meta.getSequenceName() != null && meta.getSequenceName().length() > 0 ) {
             technicalKey =
               data.db.getNextSequenceValue( data.realSchemaName, meta.getSequenceName(), meta.getKeyField() );
-            if ( technicalKey != null && log.isRowLevel() ) {
+            if ( technicalKey != null && isRowLevel() ) {
               logRowlevel( BaseMessages.getString( PKG, "DimensionLookup.Log.FoundNextSequence2" )
                 + technicalKey.toString() );
             }
@@ -756,13 +764,13 @@ public class DimensionLookup extends BaseStep implements StepInterface {
 
         returnRow = new Object[data.returnRowMeta.size()];
         returnRow[0] = technicalKey;
-        if ( log.isRowLevel() ) {
+        if ( isRowLevel() ) {
           logRowlevel( BaseMessages.getString( PKG, "DimensionLookup.Log.TechnicalKey" ) + technicalKey );
         }
       }
     }
 
-    if ( log.isRowLevel() ) {
+    if ( isRowLevel() ) {
       logRowlevel( BaseMessages.getString( PKG, "DimensionLookup.Log.AddValuesToRow" )
         + data.returnRowMeta.getString( returnRow ) );
     }
@@ -781,7 +789,7 @@ public class DimensionLookup extends BaseStep implements StepInterface {
     // Then the technical key...
     //
     if ( data.returnRowMeta.getValueMeta( 0 ).isBigNumber() && returnRow[0] instanceof Long ) {
-      if ( log.isDebug() ) {
+      if ( isDebug() ) {
         log.logDebug( "Changing the type of the technical key from TYPE_BIGNUMBER to an TYPE_INTEGER" );
       }
       ValueMetaInterface tkValueMeta = data.returnRowMeta.getValueMeta( 0 );
@@ -908,7 +916,7 @@ public class DimensionLookup extends BaseStep implements StepInterface {
     }
   }
 
-  private boolean isAutoIncrement() {
+  protected boolean isAutoIncrement() {
     return techKeyCreation == CREATION_METHOD_AUTOINC;
   }
 
@@ -920,9 +928,7 @@ public class DimensionLookup extends BaseStep implements StepInterface {
     Long versionNr, Date dateFrom, Date dateTo ) throws KettleException {
     DatabaseMeta databaseMeta = meta.getDatabaseMeta();
 
-    if ( data.prepStatementInsert == null && data.prepStatementUpdate == null ) // first time: construct prepared
-                                                                                // statement
-    {
+    if ( data.prepStatementInsert == null && data.prepStatementUpdate == null ) { // first time: construct prepared statement
       RowMetaInterface insertRowMeta = new RowMeta();
 
       /*
@@ -1026,7 +1032,7 @@ public class DimensionLookup extends BaseStep implements StepInterface {
       sql += " )";
 
       try {
-        if ( technicalKey == null ) {
+        if ( technicalKey == null && databaseMeta.supportsAutoGeneratedKeys() ) {
           logDetailed( "SQL w/ return keys=[" + sql + "]" );
           data.prepStatementInsert =
             data.db.getConnection().prepareStatement(
@@ -1159,7 +1165,7 @@ public class DimensionLookup extends BaseStep implements StepInterface {
       }
     }
 
-    if ( log.isDebug() ) {
+    if ( isDebug() ) {
       logDebug( "rins, size=" + data.insertRowMeta.size() + ", values=" + data.insertRowMeta.getString( insertRow ) );
     }
 
@@ -1167,10 +1173,10 @@ public class DimensionLookup extends BaseStep implements StepInterface {
     data.db.setValues( data.insertRowMeta, insertRow, data.prepStatementInsert );
     data.db.insertRow( data.prepStatementInsert );
 
-    if ( log.isDebug() ) {
+    if ( isDebug() ) {
       logDebug( "Row inserted!" );
     }
-    if ( isAutoIncrement() ) {
+    if ( technicalKey == null && databaseMeta.supportsAutoGeneratedKeys() ) {
       try {
         RowMetaAndData keys = data.db.getGeneratedKeys( data.prepStatementInsert );
         if ( keys.getRowMeta().size() > 0 ) {
@@ -1185,8 +1191,7 @@ public class DimensionLookup extends BaseStep implements StepInterface {
       }
     }
 
-    if ( !newEntry ) // we have to update the previous version in the dimension!
-    {
+    if ( !newEntry ) { // we have to update the previous version in the dimension!
       /*
        * UPDATE d_customer SET dateto = val_datfrom , last_updated = <now> , last_version = false WHERE keylookup[] =
        * keynrs[] AND versionfield = val_version - 1 ;
@@ -1239,7 +1244,7 @@ public class DimensionLookup extends BaseStep implements StepInterface {
 
       updateRow[updateIndex++] = versionNr - 1;
 
-      if ( log.isRowLevel() ) {
+      if ( isRowLevel() ) {
         logRowlevel( "UPDATE using rupd=" + data.updateRowMeta.getString( updateRow ) );
       }
 
@@ -1248,16 +1253,24 @@ public class DimensionLookup extends BaseStep implements StepInterface {
       // set values for update
       //
       data.db.setValues( data.updateRowMeta, updateRow, data.prepStatementUpdate );
-      if ( log.isDebug() ) {
+      if ( isDebug() ) {
         logDebug( "Values set for update (" + data.updateRowMeta.size() + ")" );
       }
       data.db.insertRow( data.prepStatementUpdate ); // do the actual update
-      if ( log.isDebug() ) {
+      if ( isDebug() ) {
         logDebug( "Row updated!" );
       }
     }
 
     return technicalKey;
+  }
+
+  public boolean isRowLevel() {
+    return log.isRowLevel();
+  }
+
+  public boolean isDebug() {
+    return log.isDebug();
   }
 
   public void dimUpdate( RowMetaInterface rowMeta, Object[] row, Long dimkey, Date valueDate ) throws KettleDatabaseException {
@@ -1316,7 +1329,7 @@ public class DimensionLookup extends BaseStep implements StepInterface {
                                                                                                // tk
 
       try {
-        if ( log.isDebug() ) {
+        if ( isDebug() ) {
           logDebug( "Preparing statement: [" + sql + "]" );
         }
         data.prepStatementDimensionUpdate =
@@ -1356,8 +1369,7 @@ public class DimensionLookup extends BaseStep implements StepInterface {
   // This updates all versions of a dimension entry.
   //
   public void dimPunchThrough( RowMetaInterface rowMeta, Object[] row ) throws KettleDatabaseException {
-    if ( data.prepStatementPunchThrough == null ) // first time: construct prepared statement
-    {
+    if ( data.prepStatementPunchThrough == null ) { // first time: construct prepared statement
       DatabaseMeta databaseMeta = meta.getDatabaseMeta();
       data.punchThroughRowMeta = new RowMeta();
 
@@ -1575,7 +1587,7 @@ public class DimensionLookup extends BaseStep implements StepInterface {
       logDetailed( "Reduced the lookup cache from " + sizeBefore + " to " + sizeAfter + " rows." );
     }
 
-    if ( log.isRowLevel() ) {
+    if ( isRowLevel() ) {
       logRowlevel( "Cache store: key=" + keyValues + "    values=" + returnValues );
     }
   }
@@ -1615,9 +1627,8 @@ public class DimensionLookup extends BaseStep implements StepInterface {
       long time = dateValue.getTime();
       long from = ( (Date) row[row.length - 2] ).getTime();
       long to = ( (Date) row[row.length - 1] ).getTime();
-      if ( time >= from && time < to ) // sanity check to see if we have the right version
-      {
-        if ( log.isRowLevel() ) {
+      if ( time >= from && time < to ) { // sanity check to see if we have the right version
+        if ( isRowLevel() ) {
           logRowlevel( "Cache hit: key="
             + data.cacheKeyRowMeta.getString( keyValues ) + "  values=" + data.cacheValueRowMeta.getString( row ) );
         }
@@ -1741,5 +1752,4 @@ public class DimensionLookup extends BaseStep implements StepInterface {
     }
     super.dispose( smi, sdi );
   }
-
 }

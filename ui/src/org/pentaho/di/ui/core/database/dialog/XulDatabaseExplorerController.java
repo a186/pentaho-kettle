@@ -86,12 +86,12 @@ public class XulDatabaseExplorerController extends AbstractXulEventHandler imple
 
   private UiPostActionStatus status = UiPostActionStatus.NONE;
 
-  private static final String DATABASE_IMAGE = "ui/images/folder_connection.png";
-  private static final String FOLDER_IMAGE = "ui/images/BOL.png";
-  private static final String SCHEMA_IMAGE = "ui/images/schema.png";
-  private static final String TABLE_IMAGE = "ui/images/table.png";
-  private static final String EXPAND_ALL_IMAGE = "ui/images/ExpandAll.png";
-  private static final String COLLAPSE_ALL_IMAGE = "ui/images/CollapseAll.png";
+  private static final String DATABASE_IMAGE = "ui/images/folder_connection.svg";
+  private static final String FOLDER_IMAGE = "ui/images/BOL.svg";
+  private static final String SCHEMA_IMAGE = "ui/images/schema.svg";
+  private static final String TABLE_IMAGE = "ui/images/table.svg";
+  private static final String EXPAND_ALL_IMAGE = "ui/images/ExpandAll.svg";
+  private static final String COLLAPSE_ALL_IMAGE = "ui/images/CollapseAll.svg";
 
   private static final String STRING_SCHEMAS = BaseMessages
     .getString( PKG, "DatabaseExplorerDialog.Schemas.Label" );
@@ -499,6 +499,15 @@ public class XulDatabaseExplorerController extends AbstractXulEventHandler imple
       new ErrorDialog( shell, "Error", "Unexpected explorer error:", e );
       this.status = UiPostActionStatus.ERROR_DIALOG_SHOWN;
       return;
+    } finally {
+      if ( theDatabase != null ) {
+        try {
+          theDatabase.disconnect();
+        } catch ( Exception ignored ) {
+          // Can't do anything else here...
+        }
+        theDatabase = null;
+      }
     }
     this.status = UiPostActionStatus.OK;
   }

@@ -65,7 +65,7 @@ public class MySQLBulkLoader extends BaseStep implements StepInterface {
   private final String threadWaitTimeText = "5min";
 
   public MySQLBulkLoader( StepMeta stepMeta, StepDataInterface stepDataInterface, int copyNr, TransMeta transMeta,
-    Trans trans ) {
+      Trans trans ) {
     super( stepMeta, stepDataInterface, copyNr, transMeta, trans );
   }
 
@@ -141,9 +141,8 @@ public class MySQLBulkLoader extends BaseStep implements StepInterface {
 
     String loadCommand = "";
     loadCommand +=
-      "LOAD DATA "
-        + ( meta.isLocalFile() ? "LOCAL" : "" ) + " INFILE '" + environmentSubstitute( meta.getFifoFileName() )
-        + "' ";
+        "LOAD DATA " + ( meta.isLocalFile() ? "LOCAL" : "" ) + " INFILE '"
+            + environmentSubstitute( meta.getFifoFileName() ) + "' ";
     if ( meta.isReplacingData() ) {
       loadCommand += "REPLACE ";
     } else if ( meta.isIgnoringErrors() ) {
@@ -163,8 +162,8 @@ public class MySQLBulkLoader extends BaseStep implements StepInterface {
       loadCommand += "OPTIONALLY ENCLOSED BY '" + meta.getEnclosure() + "' ";
     }
     loadCommand +=
-      "ESCAPED BY '"
-        + meta.getEscapeChar() + ( "\\".equals( meta.getEscapeChar() ) ? meta.getEscapeChar() : "" ) + "' ";
+        "ESCAPED BY '" + meta.getEscapeChar() + ( "\\".equals( meta.getEscapeChar() ) ? meta.getEscapeChar() : "" )
+            + "' ";
 
     // Build list of column names to set
     loadCommand += "(";
@@ -254,7 +253,7 @@ public class MySQLBulkLoader extends BaseStep implements StepInterface {
               data.bulkFormatMeta[i] = data.bulkTimestampMeta.clone(); // default to timestamp
             }
           } else if ( sourceMeta.isNumeric()
-            && meta.getFieldFormatType()[i] == MySQLBulkLoaderMeta.FIELD_FORMAT_TYPE_NUMBER ) {
+              && meta.getFieldFormatType()[i] == MySQLBulkLoaderMeta.FIELD_FORMAT_TYPE_NUMBER ) {
             data.bulkFormatMeta[i] = data.bulkNumberMeta.clone();
           }
 
@@ -302,8 +301,7 @@ public class MySQLBulkLoader extends BaseStep implements StepInterface {
     if ( data.sqlRunner != null ) {
 
       // wait for the INSERT statement to finish and check for any error and/or warning...
-      logDebug( "Waiting up to "
-        + this.threadWaitTimeText + " for the MySQL load command thread to finish processing." );
+      logDebug( "Waiting up to " + this.threadWaitTimeText + " for the MySQL load command thread to finish processing." );
       data.sqlRunner.join( this.threadWaitTime );
       SqlRunner sqlRunner = data.sqlRunner;
       data.sqlRunner = null;
@@ -337,15 +335,15 @@ public class MySQLBulkLoader extends BaseStep implements StepInterface {
             case ValueMetaInterface.TYPE_STRING:
               data.fifoStream.write( data.quote );
               if ( valueMeta.isStorageBinaryString()
-                && meta.getFieldFormatType()[i] == MySQLBulkLoaderMeta.FIELD_FORMAT_TYPE_OK ) {
+                  && meta.getFieldFormatType()[i] == MySQLBulkLoaderMeta.FIELD_FORMAT_TYPE_OK ) {
                 // We had a string, just dump it back.
                 data.fifoStream.write( (byte[]) valueData );
               } else {
                 String string = valueMeta.getString( valueData );
                 if ( string != null ) {
                   if ( meta.getFieldFormatType()[i] == MySQLBulkLoaderMeta.FIELD_FORMAT_TYPE_STRING_ESCAPE ) {
-                    string =
-                      Const.replace( string, meta.getEnclosure(), meta.getEscapeChar() + meta.getEnclosure() );
+                    string = Const.replace( string, meta.getEscapeChar(), meta.getEscapeChar() + meta.getEscapeChar() );
+                    string = Const.replace( string, meta.getEnclosure(), meta.getEscapeChar() + meta.getEnclosure() );
                   }
                   data.fifoStream.write( string.getBytes() );
                 }
@@ -386,6 +384,16 @@ public class MySQLBulkLoader extends BaseStep implements StepInterface {
               if ( valueMeta.isStorageBinaryString() && data.bulkFormatMeta[i] == null ) {
                 data.fifoStream.write( (byte[]) valueData );
               } else {
+                /**
+                 * If this is the first line, reset default conversion mask for Number type (#.#;-#.#).
+                 * This will make conversion mask to be calculated according to meta data (length, precision).
+                 *
+                 * http://jira.pentaho.com/browse/PDI-11421
+                 */
+                if ( getLinesWritten() == 0 ) {
+                  data.bulkFormatMeta[i].setConversionMask( null );
+                }
+
                 Double d = valueMeta.getNumber( valueData );
                 if ( d != null ) {
                   data.fifoStream.write( data.bulkFormatMeta[i].getString( d ).getBytes() );
@@ -418,8 +426,8 @@ public class MySQLBulkLoader extends BaseStep implements StepInterface {
     } catch ( IOException e ) {
       // If something went wrong with writing to the fifo, get the underlying error from MySQL
       try {
-        logError( "IOException writing to fifo.  Waiting up to "
-          + this.threadWaitTimeText + " for the MySQL load command thread to return with the error." );
+        logError( "IOException writing to fifo.  Waiting up to " + this.threadWaitTimeText
+            + " for the MySQL load command thread to return with the error." );
         try {
           data.sqlRunner.join( this.threadWaitTime );
         } catch ( InterruptedException ex ) {
@@ -447,35 +455,36 @@ public class MySQLBulkLoader extends BaseStep implements StepInterface {
       if ( Const.isEmpty( meta.getEnclosure() ) ) {
         data.quote = new byte[] {};
       } else {
-        data.quote = meta.getEnclosure().getBytes();
+        data.quote = environmentSubstitute( meta.getEnclosure() ).getBytes();
       }
       if ( Const.isEmpty( meta.getDelimiter() ) ) {
         data.separator = "\t".getBytes();
       } else {
-        data.separator = meta.getDelimiter().getBytes();
+        data.separator = environmentSubstitute( meta.getDelimiter() ).getBytes();
       }
       data.newline = Const.CR.getBytes();
 
+      String realEncoding = environmentSubstitute( meta.getEncoding() );
       data.bulkTimestampMeta = new ValueMeta( "timestampMeta", ValueMetaInterface.TYPE_DATE );
       data.bulkTimestampMeta.setConversionMask( "yyyy-MM-dd HH:mm:ss" );
-      data.bulkTimestampMeta.setStringEncoding( meta.getEncoding() );
+      data.bulkTimestampMeta.setStringEncoding( realEncoding );
 
       data.bulkDateMeta = new ValueMeta( "dateMeta", ValueMetaInterface.TYPE_DATE );
       data.bulkDateMeta.setConversionMask( "yyyy-MM-dd" );
-      data.bulkDateMeta.setStringEncoding( meta.getEncoding() );
+      data.bulkDateMeta.setStringEncoding( realEncoding );
 
       data.bulkNumberMeta = new ValueMeta( "numberMeta", ValueMetaInterface.TYPE_NUMBER );
       data.bulkNumberMeta.setConversionMask( "#.#" );
       data.bulkNumberMeta.setGroupingSymbol( "," );
       data.bulkNumberMeta.setDecimalSymbol( "." );
-      data.bulkNumberMeta.setStringEncoding( meta.getEncoding() );
+      data.bulkNumberMeta.setStringEncoding( realEncoding );
 
       data.bulkSize = Const.toLong( environmentSubstitute( meta.getBulkSize() ), -1L );
 
       // Schema-table combination...
       data.schemaTable =
-        meta.getDatabaseMeta().getQuotedSchemaTableCombination(
-          environmentSubstitute( meta.getSchemaName() ), environmentSubstitute( meta.getTableName() ) );
+          meta.getDatabaseMeta().getQuotedSchemaTableCombination( environmentSubstitute( meta.getSchemaName() ),
+              environmentSubstitute( meta.getTableName() ) );
 
       return true;
     }

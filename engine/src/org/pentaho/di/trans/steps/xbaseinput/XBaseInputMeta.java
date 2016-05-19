@@ -25,7 +25,7 @@ package org.pentaho.di.trans.steps.xbaseinput;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.commons.vfs.FileObject;
+import org.apache.commons.vfs2.FileObject;
 import org.pentaho.di.core.CheckResult;
 import org.pentaho.di.core.CheckResultInterface;
 import org.pentaho.di.core.Const;
@@ -353,7 +353,7 @@ public class XBaseInputMeta extends BaseStepMeta implements StepMetaInterface {
   }
 
   public String getXML() {
-    StringBuffer retval = new StringBuffer();
+    StringBuilder retval = new StringBuilder();
 
     retval.append( "    " + XMLHandler.addTagValue( "file_dbf", dbfFileName ) );
     retval.append( "    " + XMLHandler.addTagValue( "limit", rowLimit ) );

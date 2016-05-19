@@ -2,7 +2,7 @@
  *
  * Pentaho Data Integration
  *
- * Copyright (C) 2002-2013 by Pentaho : http://www.pentaho.com
+ * Copyright (C) 2002-2016 by Pentaho : http://www.pentaho.com
  *
  *******************************************************************************
  *
@@ -32,10 +32,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.commons.vfs.FileName;
-import org.apache.commons.vfs.FileObject;
-import org.apache.commons.vfs.FileSystemException;
-import org.apache.commons.vfs.FileType;
+import org.apache.commons.vfs2.FileName;
+import org.apache.commons.vfs2.FileObject;
+import org.apache.commons.vfs2.FileSystemException;
+import org.apache.commons.vfs2.FileType;
 import org.pentaho.di.cluster.ClusterSchema;
 import org.pentaho.di.cluster.SlaveServer;
 import org.pentaho.di.core.Condition;
@@ -131,6 +131,10 @@ public class KettleFileRepository extends AbstractRepository {
       this.metaStore.setDescription( this.repositoryMeta.getDescription() );
     }
     connected = true;
+  }
+
+  @Override public boolean test() {
+    return new File( this.repositoryMeta.getBaseDirectory() ).exists();
   }
 
   public void disconnect() {
@@ -255,7 +259,8 @@ public class KettleFileRepository extends AbstractRepository {
     return calcDirectoryName( null ) + id.toString();
   }
 
-  private FileObject getFileObject( RepositoryElementInterface element ) throws KettleFileException {
+  // package-local visibility for testing purposes
+  FileObject getFileObject( RepositoryElementInterface element ) throws KettleFileException {
     return KettleVFS.getFileObject( calcFilename( element.getRepositoryDirectory(), element.getName(), element
       .getRepositoryElementType().getExtension() ) );
   }
@@ -496,7 +501,18 @@ public class KettleFileRepository extends AbstractRepository {
   }
 
   public ObjectId getDatabaseID( String name ) throws KettleException {
-    return getObjectId( null, name, EXT_DATABASE );
+    ObjectId match = getObjectId( null, name, EXT_DATABASE );
+    if ( match == null ) {
+      // exact match failed, trying to find the DB case-insensitively
+      ObjectId[] existingIds = getDatabaseIDs( false );
+      String[] existingNames = getDatabaseNames( existingIds );
+      int index = DatabaseMeta.indexOfName( existingNames, name );
+      if ( index != -1 ) {
+        return getObjectId( null, existingNames[ index ], EXT_DATABASE );
+      }
+    }
+
+    return match;
   }
 
   public ObjectId[] getTransformationDatabaseIDs( ObjectId id_transformation ) throws KettleException {
@@ -509,6 +525,10 @@ public class KettleFileRepository extends AbstractRepository {
 
   public String[] getDatabaseNames( boolean includeDeleted ) throws KettleException {
     return convertRootIDsToNames( getDatabaseIDs( false ) );
+  }
+
+  private String[] getDatabaseNames( ObjectId[] databaseIds ) throws KettleException {
+    return convertRootIDsToNames( databaseIds );
   }
 
   public String[] getDirectoryNames( ObjectId id_directory ) throws KettleException {
@@ -1020,6 +1040,8 @@ public class KettleFileRepository extends AbstractRepository {
     //
     String filename = calcDirectoryName( repdir ) + transname + ".ktr";
     TransMeta transMeta = new TransMeta( filename, this, setInternalVariables );
+    transMeta.setRepository( this );
+    transMeta.setMetaStore( getMetaStore() );
     transMeta.setFilename( null );
     transMeta.setName( transname );
     transMeta.setObjectId( new StringObjectId( calcObjectId( repdir, transname, EXT_TRANSFORMATION ) ) );
@@ -1050,8 +1072,7 @@ public class KettleFileRepository extends AbstractRepository {
 
         DatabaseMeta check = transMeta.findDatabase( databaseMeta.getName() ); // Check if there already is one in the
                                                                                // transformation
-        if ( check == null || overWriteShared ) // We only add, never overwrite database connections.
-        {
+        if ( check == null || overWriteShared ) { // We only add, never overwrite database connections.
           if ( databaseMeta.getName() != null ) {
             transMeta.addOrReplaceDatabase( databaseMeta );
             if ( !overWriteShared ) {
@@ -1183,9 +1204,18 @@ public class KettleFileRepository extends AbstractRepository {
     return id.getId().substring( slashIndex + 1, dotIndex );
   }
 
-  public ObjectId renameJob( ObjectId id_job, RepositoryDirectoryInterface newDir, String newName ) throws KettleException {
-    return renameObject( id_job, newDir, newName, EXT_JOB );
+  public ObjectId renameJob( ObjectId id_job, RepositoryDirectoryInterface newDir, String newName )
+    throws KettleException {
+    return renameJob( id_job, null, newDir, newName );
+  }
 
+  public ObjectId renameJob( ObjectId id_job, String versionComment, RepositoryDirectoryInterface newDir,
+    String newName ) throws KettleException {
+    ObjectId objectId = renameObject( id_job, newDir, newName, EXT_JOB );
+    if ( !Const.isEmpty( versionComment ) ) {
+      insertLogEntry( "Rename job : " + versionComment );
+    }
+    return objectId;
   }
 
   public ObjectId renameRepositoryDirectory( ObjectId id, RepositoryDirectoryInterface newParentDir, String newName ) throws KettleException {
@@ -1225,9 +1255,18 @@ public class KettleFileRepository extends AbstractRepository {
     return ( id );
   }
 
-  public ObjectId renameTransformation( ObjectId id_transformation, RepositoryDirectoryInterface newDir,
-    String newName ) throws KettleException {
-    return renameObject( id_transformation, newDir, newName, EXT_TRANSFORMATION );
+  public ObjectId renameTransformation( ObjectId id_transformation, RepositoryDirectoryInterface newDir, String newName )
+    throws KettleException {
+    return renameTransformation( id_transformation, null, newDir, newName );
+  }
+
+  public ObjectId renameTransformation( ObjectId id_transformation, String versionComment,
+      RepositoryDirectoryInterface newDir, String newName ) throws KettleException {
+    ObjectId objectId = renameObject( id_transformation, newDir, newName, EXT_TRANSFORMATION );
+    if ( !Const.isEmpty( versionComment ) ) {
+      insertLogEntry( "Rename transformation : " + versionComment );
+    }
+    return objectId;
   }
 
   public ObjectId saveCondition( Condition condition ) throws KettleException {

@@ -3,7 +3,7 @@
  *
  * Pentaho Data Integration
  *
- * Copyright (C) 2002-2013 by Pentaho : http://www.pentaho.com
+ * Copyright (C) 2002-2016 by Pentaho : http://www.pentaho.com
  *
  *******************************************************************************
  *
@@ -23,20 +23,6 @@
 
 package org.pentaho.di.core.database;
 
-import java.sql.ResultSet;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.Enumeration;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
-import java.util.Set;
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
-
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.RowMetaAndData;
 import org.pentaho.di.core.encryption.Encr;
@@ -50,9 +36,10 @@ import org.pentaho.di.core.plugins.DatabasePluginType;
 import org.pentaho.di.core.plugins.PluginInterface;
 import org.pentaho.di.core.plugins.PluginRegistry;
 import org.pentaho.di.core.row.RowMetaInterface;
-import org.pentaho.di.core.row.ValueMeta;
 import org.pentaho.di.core.row.ValueMetaInterface;
 import org.pentaho.di.core.row.value.ValueMetaBase;
+import org.pentaho.di.core.row.value.ValueMetaString;
+import org.pentaho.di.core.util.ExecutorUtil;
 import org.pentaho.di.core.variables.VariableSpace;
 import org.pentaho.di.core.variables.Variables;
 import org.pentaho.di.core.xml.XMLHandler;
@@ -67,6 +54,20 @@ import org.pentaho.di.repository.RepositoryObjectType;
 import org.pentaho.di.shared.SharedObjectBase;
 import org.pentaho.di.shared.SharedObjectInterface;
 import org.w3c.dom.Node;
+
+import java.sql.ResultSet;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Future;
 
 /**
  * This class defines the database specific parameters for a certain database type. It also provides static information
@@ -84,6 +85,8 @@ public class DatabaseMeta extends SharedObjectBase implements Cloneable, XMLInte
 
   public static final RepositoryObjectType REPOSITORY_ELEMENT_TYPE = RepositoryObjectType.DATABASE;
 
+  private static final String DROP_TABLE_STATEMENT = "DROP TABLE IF EXISTS ";
+
   // Comparator for sorting databases alphabetically by name
   public static final Comparator<DatabaseMeta> comparator = new Comparator<DatabaseMeta>() {
     @Override
@@ -94,9 +97,25 @@ public class DatabaseMeta extends SharedObjectBase implements Cloneable, XMLInte
 
   private DatabaseInterface databaseInterface;
 
-  private static final ReadWriteLock databaseInterfacesMapLock = new ReentrantReadWriteLock();
+  private static volatile Future<Map<String, DatabaseInterface>> allDatabaseInterfaces;
 
-  private static Map<String, DatabaseInterface> allDatabaseInterfaces;
+  static {
+    PluginRegistry.getInstance().addPluginListener( DatabasePluginType.class,
+      new org.pentaho.di.core.plugins.PluginTypeListener() {
+        @Override public void pluginAdded( Object serviceObject ) {
+          clearDatabaseInterfacesMap();
+        }
+
+        @Override public void pluginRemoved( Object serviceObject ) {
+          clearDatabaseInterfacesMap();
+
+        }
+
+        @Override public void pluginChanged( Object serviceObject ) {
+          clearDatabaseInterfacesMap();
+        }
+      } );
+  }
 
   private VariableSpace variables = new Variables();
 
@@ -1010,7 +1029,7 @@ public class DatabaseMeta extends SharedObjectBase implements Cloneable, XMLInte
 
   @Override
   public String getXML() {
-    StringBuffer retval = new StringBuffer( 250 );
+    StringBuilder retval = new StringBuilder( 250 );
 
     retval.append( "  <" ).append( XML_TAG ).append( '>' ).append( Const.CR );
     retval.append( "    " ).append( XMLHandler.addTagValue( "name", getName() ) );
@@ -1093,52 +1112,97 @@ public class DatabaseMeta extends SharedObjectBase implements Cloneable, XMLInte
       port = environmentSubstitute( getDatabasePortNumberString() );
       databaseName = environmentSubstitute( getDatabaseName() );
     }
-    baseUrl = databaseInterface.getURL( hostname, port, databaseName );
-    StringBuffer url = new StringBuffer( environmentSubstitute( baseUrl ) );
+    baseUrl = databaseInterface.getURL( environmentSubstitute( hostname ), environmentSubstitute( port ),
+      environmentSubstitute( databaseName ) );
+    String url =  environmentSubstitute( baseUrl );
 
     if ( databaseInterface.supportsOptionsInURL() ) {
-      // OK, now add all the options...
-      String optionIndicator = getExtraOptionIndicator();
-      String optionSeparator = getExtraOptionSeparator();
-      String valueSeparator = getExtraOptionValueSeparator();
-
-      Map<String, String> map = getExtraOptions();
-      if ( map.size() > 0 ) {
-        Iterator<String> iterator = map.keySet().iterator();
-        boolean first = true;
-        while ( iterator.hasNext() ) {
-          String typedParameter = iterator.next();
-          int dotIndex = typedParameter.indexOf( '.' );
-          if ( dotIndex >= 0 ) {
-            String typeCode = typedParameter.substring( 0, dotIndex );
-            String parameter = typedParameter.substring( dotIndex + 1 );
-            String value = map.get( typedParameter );
-
-            // Only add to the URL if it's the same database type code...
-            //
-            if ( databaseInterface.getPluginId().equals( typeCode ) ) {
-              if ( first && url.indexOf( valueSeparator ) == -1 ) {
-                url.append( optionIndicator );
-              } else {
-                url.append( optionSeparator );
-              }
-
-              url.append( parameter );
-              if ( !Const.isEmpty( value ) && !value.equals( EMPTY_OPTIONS_STRING ) ) {
-                url.append( valueSeparator ).append( value );
-              }
-              first = false;
-            }
-          }
-        }
-      }
+      url = appendExtraOptions( url, getExtraOptions() );
     }
     // else {
     // We need to put all these options in a Properties file later (Oracle & Co.)
     // This happens at connect time...
     // }
 
-    return url.toString();
+    return url;
+  }
+
+  protected String appendExtraOptions( String url, Map<String, String> extraOptions ) {
+    if ( extraOptions.isEmpty() ) {
+      return url;
+    }
+
+    StringBuilder urlBuilder = new StringBuilder( url );
+
+    final String optionIndicator = getExtraOptionIndicator();
+    final String optionSeparator = getExtraOptionSeparator();
+    final String valueSeparator = getExtraOptionValueSeparator();
+
+    Iterator<String> iterator = extraOptions.keySet().iterator();
+    boolean first = true;
+    while ( iterator.hasNext() ) {
+      String typedParameter = iterator.next();
+      int dotIndex = typedParameter.indexOf( '.' );
+      if ( dotIndex == -1 ) {
+        continue;
+      }
+
+      final String value = extraOptions.get( typedParameter );
+      if ( Const.isEmpty( value ) || value.equals( EMPTY_OPTIONS_STRING ) ) {
+        // skip this science no value is provided
+        continue;
+      }
+
+      final String typeCode = typedParameter.substring( 0, dotIndex );
+      final String parameter = typedParameter.substring( dotIndex + 1 );
+
+      // Only add to the URL if it's the same database type code,
+      // or underlying database is the same for both id's, and any subset of
+      // connection settings for one database is valid for another
+      boolean dbForBothDbInterfacesIsSame = false;
+      try {
+        DatabaseInterface primaryDb = getDbInterface( typeCode );
+        dbForBothDbInterfacesIsSame = databaseForBothDbInterfacesIsTheSame( primaryDb, getDatabaseInterface() );
+      } catch ( KettleDatabaseException e ) {
+        getGeneralLogger().logError(
+          "DatabaseInterface with " + typeCode + " database type is not found! Parameter " + parameter
+            + "won't be appended to URL" );
+      }
+      if ( dbForBothDbInterfacesIsSame ) {
+        if ( first && url.indexOf( valueSeparator ) == -1 ) {
+          urlBuilder.append( optionIndicator );
+        } else {
+          urlBuilder.append( optionSeparator );
+        }
+
+        urlBuilder.append( parameter ).append( valueSeparator ).append( value );
+        first = false;
+      }
+    }
+
+    return urlBuilder.toString();
+  }
+
+  /**
+   * This method is designed to identify whether the actual database for two database connection types is the same.
+   * This situation can occur in two cases:
+   * 1. plugin id of {@code primary} is the same as plugin id of {@code secondary}
+   * 2. {@code secondary} is a descendant {@code primary} (with any deepness).
+   */
+  protected boolean databaseForBothDbInterfacesIsTheSame( DatabaseInterface primary, DatabaseInterface secondary ) {
+    if ( primary == null || secondary == null ) {
+      throw new IllegalArgumentException( "DatabaseInterface shouldn't be null!" );
+    }
+
+    if ( primary.getPluginId() == null || secondary.getPluginId() == null ) {
+      return false;
+    }
+
+    if ( primary.getPluginId().equals( secondary.getPluginId() ) ) {
+      return true;
+    }
+
+    return primary.getClass().isAssignableFrom( secondary.getClass() );
   }
 
   public Properties getConnectionProperties() {
@@ -1171,21 +1235,21 @@ public class DatabaseMeta extends SharedObjectBase implements Cloneable, XMLInte
   }
 
   public String getExtraOptionIndicator() {
-    return databaseInterface.getExtraOptionIndicator();
+    return getDatabaseInterface().getExtraOptionIndicator();
   }
 
   /**
    * @return The extra option separator in database URL for this platform (usually this is semicolon ; )
    */
   public String getExtraOptionSeparator() {
-    return databaseInterface.getExtraOptionSeparator();
+    return getDatabaseInterface().getExtraOptionSeparator();
   }
 
   /**
    * @return The extra option value separator in database URL for this platform (usually this is the equal sign = )
    */
   public String getExtraOptionValueSeparator() {
-    return databaseInterface.getExtraOptionValueSeparator();
+    return getDatabaseInterface().getExtraOptionValueSeparator();
   }
 
   /**
@@ -1200,6 +1264,19 @@ public class DatabaseMeta extends SharedObjectBase implements Cloneable, XMLInte
    */
   public void addExtraOption( String databaseTypeCode, String option, String value ) {
     databaseInterface.addExtraOption( databaseTypeCode, option, value );
+  }
+
+  public void applyDefaultOptions( DatabaseInterface databaseInterface ) {
+    final Map<String, String> extraOptions = getExtraOptions();
+
+    final Map<String, String> defaultOptions = databaseInterface.getDefaultOptions();
+    for ( String option : defaultOptions.keySet() ) {
+      String value = defaultOptions.get( option );
+      String[] split = option.split( "[.]", 2 );
+      if ( !extraOptions.containsKey( option ) && split.length == 2 ) {
+        addExtraOption( split[0], split[1], value );
+      }
+    }
   }
 
   /**
@@ -1328,58 +1405,60 @@ public class DatabaseMeta extends SharedObjectBase implements Cloneable, XMLInte
    * next call to getDatabaseInterfacesMap() will reload the map.
    */
   public static final void clearDatabaseInterfacesMap() {
-    databaseInterfacesMapLock.writeLock().lock();
     allDatabaseInterfaces = null;
-    databaseInterfacesMapLock.writeLock().unlock();
   }
 
-  private static final Map<String, DatabaseInterface> createDatabaseInterfacesMap() {
-    LogChannelInterface log = LogChannel.GENERAL;
-    PluginRegistry registry = PluginRegistry.getInstance();
+  private static final Future<Map<String, DatabaseInterface>> createDatabaseInterfacesMap() {
+    return ExecutorUtil.getExecutor().submit( new Callable<Map<String, DatabaseInterface>>() {
+      private Map<String, DatabaseInterface> doCreate() {
+        LogChannelInterface log = LogChannel.GENERAL;
+        PluginRegistry registry = PluginRegistry.getInstance();
 
-    List<PluginInterface> plugins = registry.getPlugins( DatabasePluginType.class );
-    HashMap<String, DatabaseInterface> tmpAllDatabaseInterfaces = new HashMap<String, DatabaseInterface>();
-    for ( PluginInterface plugin : plugins ) {
-      try {
-        DatabaseInterface databaseInterface = (DatabaseInterface) registry.loadClass( plugin );
-        databaseInterface.setPluginId( plugin.getIds()[0] );
-        databaseInterface.setPluginName( plugin.getName() );
-        tmpAllDatabaseInterfaces.put( plugin.getIds()[0], databaseInterface );
-      } catch ( KettlePluginException cnfe ) {
-        System.out.println( "Could not create connection entry for "
-          + plugin.getName() + ".  " + cnfe.getCause().getClass().getName() );
-        log.logError( "Could not create connection entry for "
-          + plugin.getName() + ".  " + cnfe.getCause().getClass().getName() );
-        if ( log.isDebug() ) {
-          log.logDebug( "Debug-Error loading plugin: " + plugin, cnfe );
+        List<PluginInterface> plugins = registry.getPlugins( DatabasePluginType.class );
+        HashMap<String, DatabaseInterface> tmpAllDatabaseInterfaces = new HashMap<String, DatabaseInterface>();
+        for ( PluginInterface plugin : plugins ) {
+          try {
+            DatabaseInterface databaseInterface = (DatabaseInterface) registry.loadClass( plugin );
+            databaseInterface.setPluginId( plugin.getIds()[ 0 ] );
+            databaseInterface.setPluginName( plugin.getName() );
+            tmpAllDatabaseInterfaces.put( plugin.getIds()[ 0 ], databaseInterface );
+          } catch ( KettlePluginException cnfe ) {
+            System.out.println( "Could not create connection entry for "
+              + plugin.getName() + ".  " + cnfe.getCause().getClass().getName() );
+            log.logError( "Could not create connection entry for "
+              + plugin.getName() + ".  " + cnfe.getCause().getClass().getName() );
+            if ( log.isDebug() ) {
+              log.logDebug( "Debug-Error loading plugin: " + plugin, cnfe );
+            }
+          } catch ( Exception e ) {
+            log.logError( "Error loading plugin: " + plugin, e );
+          }
         }
-      } catch ( Exception e ) {
-        log.logError( "Error loading plugin: " + plugin, e );
+        return Collections.unmodifiableMap( tmpAllDatabaseInterfaces );
       }
-    }
-    return Collections.unmodifiableMap( tmpAllDatabaseInterfaces );
+
+      @Override public Map<String, DatabaseInterface> call() throws Exception {
+        return doCreate();
+      }
+    } );
   }
 
   public static final Map<String, DatabaseInterface> getDatabaseInterfacesMap() {
-    // Acquire read lock
-    databaseInterfacesMapLock.readLock().lock();
+    Future<Map<String, DatabaseInterface>> allDatabaseInterfaces = DatabaseMeta.allDatabaseInterfaces;
+    while ( allDatabaseInterfaces == null ) {
+      DatabaseMeta.allDatabaseInterfaces = createDatabaseInterfacesMap();
+      allDatabaseInterfaces = DatabaseMeta.allDatabaseInterfaces;
+    }
     try {
-      if ( allDatabaseInterfaces == null ) {
-        // Upgrade lock to write and load database map (Must release read to acquire write)
-        databaseInterfacesMapLock.readLock().unlock();
-        try {
-          databaseInterfacesMapLock.writeLock().lock();
-          allDatabaseInterfaces = createDatabaseInterfacesMap();
-        } finally {
-          // Downgrade the lock to read
-          databaseInterfacesMapLock.readLock().lock();
-          databaseInterfacesMapLock.writeLock().unlock();
-        }
+      return allDatabaseInterfaces.get();
+    } catch ( Exception e ) {
+      clearDatabaseInterfacesMap();
+      // doCreate() above doesn't declare any exceptions so anything that comes out SHOULD be a runtime exception
+      if ( e instanceof RuntimeException ) {
+        throw (RuntimeException) e;
+      } else {
+        throw new RuntimeException( e );
       }
-      return allDatabaseInterfaces;
-    } finally {
-      // Release read lock
-      databaseInterfacesMapLock.readLock().unlock();
     }
   }
 
@@ -1418,10 +1497,24 @@ public class DatabaseMeta extends SharedObjectBase implements Cloneable, XMLInte
     if ( sbsql == null ) {
       return null;
     }
-    return stripCR( new StringBuffer( sbsql ) );
+    return stripCR( new StringBuilder( sbsql ) );
   }
 
   public String stripCR( StringBuffer sbsql ) {
+    // DB2 Can't handle \n in SQL Statements...
+    if ( !supportsNewLinesInSQL() ) {
+      // Remove CR's
+      for ( int i = sbsql.length() - 1; i >= 0; i-- ) {
+        if ( sbsql.charAt( i ) == '\n' || sbsql.charAt( i ) == '\r' ) {
+          sbsql.setCharAt( i, ' ' );
+        }
+      }
+    }
+
+    return sbsql.toString();
+  }
+
+  public String stripCR( StringBuilder sbsql ) {
     // DB2 Can't handle \n in SQL Statements...
     if ( !supportsNewLinesInSQL() ) {
       // Remove CR's
@@ -1493,14 +1586,14 @@ public class DatabaseMeta extends SharedObjectBase implements Cloneable, XMLInte
     }
 
     if ( !isPartitioned()
-      && !( getDatabaseInterface() instanceof SAPR3DatabaseMeta
-      || getDatabaseInterface() instanceof GenericDatabaseMeta ) ) {
+      && ( ( (BaseDatabaseMeta) getDatabaseInterface() ).requiresName()
+      && !( getDatabaseInterface() instanceof GenericDatabaseMeta ) ) ) {
       if ( getDatabaseName() == null || getDatabaseName().length() == 0 ) {
         remarks.add( "Please specify the name of the database" );
       }
     }
 
-    return remarks.toArray( new String[remarks.size()] );
+    return remarks.toArray( new String[ remarks.size() ] );
   }
 
   /**
@@ -1931,7 +2024,7 @@ public class DatabaseMeta extends SharedObjectBase implements Cloneable, XMLInte
     final String par = "Parameter";
     final String val = "Value";
 
-    ValueMetaInterface testValue = new ValueMeta( "FIELD", ValueMetaInterface.TYPE_STRING );
+    ValueMetaInterface testValue = new ValueMetaString( "FIELD" );
     testValue.setLength( 30 );
 
     if ( databaseInterface != null ) {
@@ -2330,6 +2423,7 @@ public class DatabaseMeta extends SharedObjectBase implements Cloneable, XMLInte
     int nr = 2;
     while ( DatabaseMeta.findDatabase( databases, getName() ) != null ) {
       setName( name + " " + nr );
+      setDisplayName( name + " " + nr );
       nr++;
     }
     return getName();
@@ -2533,6 +2627,21 @@ public class DatabaseMeta extends SharedObjectBase implements Cloneable, XMLInte
     return null;
   }
 
+  public static int indexOfName( String[] databaseNames, String name ) {
+    if ( databaseNames == null || name == null ) {
+      return -1;
+    }
+
+    for ( int i = 0; i < databaseNames.length; i++ ) {
+      String databaseName = databaseNames[ i ];
+      if ( name.equalsIgnoreCase( databaseName ) ) {
+        return i;
+      }
+    }
+
+    return -1;
+  }
+
   /**
    * Find a database with a certain ID in an arraylist of databases.
    *
@@ -2676,7 +2785,7 @@ public class DatabaseMeta extends SharedObjectBase implements Cloneable, XMLInte
 
   public String testConnection() {
 
-    StringBuffer report = new StringBuffer();
+    StringBuilder report = new StringBuilder();
 
     // If the plug-in needs to provide connection information, we ask the DatabaseInterface...
     //
@@ -2872,4 +2981,54 @@ public class DatabaseMeta extends SharedObjectBase implements Cloneable, XMLInte
     this.readOnly = readOnly;
   }
 
+  public String getSequenceNoMaxValueOption() {
+    return databaseInterface.getSequenceNoMaxValueOption();
+  }
+
+  /**
+   * @return true if the database supports autoGeneratedKeys
+   */
+  public boolean supportsAutoGeneratedKeys() {
+    return databaseInterface.supportsAutoGeneratedKeys();
+  }
+
+
+  /**
+   * Customizes the ValueMetaInterface defined in the base
+   *
+   * @return String the create table statement
+   */
+  public String getCreateTableStatement() {
+    return databaseInterface.getCreateTableStatement();
+  }
+
+  /**
+   * Forms the drop table statement specific for a certain RDBMS.
+   *
+   * @param tableName Name of the table to drop
+   * @return Drop table statement specific for the current database
+   * @see <a href="http://jira.pentaho.com/browse/BISERVER-13024">BISERVER-13024</a>
+   */
+  public String getDropTableIfExistsStatement( String tableName ) {
+    if ( databaseInterface instanceof DatabaseInterfaceExtended ) {
+      return ( (DatabaseInterfaceExtended) databaseInterface ).getDropTableIfExistsStatement( tableName );
+    }
+    // A fallback statement in case somehow databaseInterface is of an old version.
+    // This is the previous, and in fact, buggy implementation. See BISERVER-13024.
+    return DROP_TABLE_STATEMENT + tableName;
+  }
+
+  /**
+   * For testing
+   */
+  protected LogChannelInterface getGeneralLogger() {
+    return LogChannel.GENERAL;
+  }
+
+  /**
+   * For testing
+   */
+  protected DatabaseInterface getDbInterface( String typeCode ) throws KettleDatabaseException {
+    return getDatabaseInterface( typeCode );
+  }
 }

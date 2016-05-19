@@ -44,8 +44,6 @@ import org.pentaho.di.core.util.EnvUtil;
 import org.pentaho.di.i18n.BaseMessages;
 import org.pentaho.di.job.Job;
 import org.pentaho.di.trans.Trans;
-import org.pentaho.di.trans.TransConfiguration;
-import org.pentaho.di.trans.TransExecutionConfiguration;
 
 public class CarteSingleton {
 
@@ -228,17 +226,11 @@ public class CarteSingleton {
 
         carteSingleton = new CarteSingleton( slaveServerConfig );
 
-        Trans trans = Carte.generateTestTransformation();
-
         String carteObjectId = UUID.randomUUID().toString();
         SimpleLoggingObject servletLoggingObject =
           new SimpleLoggingObject( "CarteSingleton", LoggingObjectType.CARTE, null );
         servletLoggingObject.setContainerObjectId( carteObjectId );
         servletLoggingObject.setLogLevel( LogLevel.BASIC );
-
-        carteSingleton.getTransformationMap().addTransformation(
-          trans.getName(), carteObjectId, trans,
-          new TransConfiguration( trans.getTransMeta(), new TransExecutionConfiguration() ) );
 
         return carteSingleton;
       } else {

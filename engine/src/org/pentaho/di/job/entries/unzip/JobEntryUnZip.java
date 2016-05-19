@@ -22,11 +22,9 @@
 
 package org.pentaho.di.job.entries.unzip;
 
-import static org.pentaho.di.job.entry.validator.AbstractFileValidator.putVariableSpace;
-import static org.pentaho.di.job.entry.validator.AndValidator.putValidators;
-import static org.pentaho.di.job.entry.validator.JobEntryValidatorUtils.andValidator;
-import static org.pentaho.di.job.entry.validator.JobEntryValidatorUtils.fileDoesNotExistValidator;
-import static org.pentaho.di.job.entry.validator.JobEntryValidatorUtils.notBlankValidator;
+import org.pentaho.di.job.entry.validator.AbstractFileValidator;
+import org.pentaho.di.job.entry.validator.AndValidator;
+import org.pentaho.di.job.entry.validator.JobEntryValidatorUtils;
 
 import java.io.File;
 import java.io.IOException;
@@ -38,11 +36,11 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import org.apache.commons.vfs.AllFileSelector;
-import org.apache.commons.vfs.FileObject;
-import org.apache.commons.vfs.FileSelectInfo;
-import org.apache.commons.vfs.FileSystemException;
-import org.apache.commons.vfs.FileType;
+import org.apache.commons.vfs2.AllFileSelector;
+import org.apache.commons.vfs2.FileObject;
+import org.apache.commons.vfs2.FileSelectInfo;
+import org.apache.commons.vfs2.FileSystemException;
+import org.apache.commons.vfs2.FileType;
 import org.pentaho.di.cluster.SlaveServer;
 import org.pentaho.di.core.CheckResultInterface;
 import org.pentaho.di.core.Const;
@@ -178,7 +176,7 @@ public class JobEntryUnZip extends JobEntryBase implements Cloneable, JobEntryIn
   }
 
   public String getXML() {
-    StringBuffer retval = new StringBuffer( 50 );
+    StringBuilder retval = new StringBuilder( 550 ); // 450 chars in just spaces and tag names alone
 
     retval.append( super.getXML() );
     retval.append( "      " ).append( XMLHandler.addTagValue( "zipfilename", zipFilename ) );
@@ -372,14 +370,12 @@ public class JobEntryUnZip extends JobEntryBase implements Cloneable, JobEntryIn
           }
 
         } else {
-          log.logError( BaseMessages.getString( PKG, "JobUnZip.Error.Label" ), BaseMessages.getString(
-            PKG, "JobUnZip.TargetFolderNotFound.Label" ) );
+          log.logError( BaseMessages.getString( PKG, "JobUnZip.TargetFolderNotFound.Label" ) );
           exitjobentry = true;
         }
       } else {
         if ( !( targetdir.getType() == FileType.FOLDER ) ) {
-          log.logError( BaseMessages.getString( PKG, "JobUnZip.Error.Label" ), BaseMessages.getString(
-            PKG, "JobUnZip.TargetFolderNotFolder.Label", realTargetdirectory ) );
+          log.logError( BaseMessages.getString( PKG, "JobUnZip.TargetFolderNotFolder.Label", realTargetdirectory ) );
           exitjobentry = true;
         } else {
           if ( log.isDetailed() ) {
@@ -392,8 +388,7 @@ public class JobEntryUnZip extends JobEntryBase implements Cloneable, JobEntryIn
       // movetodirectory must be provided
       if ( afterunzip == 2 ) {
         if ( Const.isEmpty( movetodirectory ) ) {
-          log.logError( BaseMessages.getString( PKG, "JobUnZip.Error.Label" ), BaseMessages.getString(
-            PKG, "JobUnZip.MoveToDirectoryEmpty.Label" ) );
+          log.logError(  BaseMessages.getString( PKG, "JobUnZip.MoveToDirectoryEmpty.Label" ) );
           exitjobentry = true;
         } else {
           movetodir = KettleVFS.getFileObject( realMovetodirectory, this );
@@ -404,8 +399,7 @@ public class JobEntryUnZip extends JobEntryBase implements Cloneable, JobEntryIn
                 logDetailed( BaseMessages.getString( PKG, "JobUnZip.Log.MoveToFolderCreated", realMovetodirectory ) );
               }
             } else {
-              log.logError( BaseMessages.getString( PKG, "JobUnZip.Error.Label" ), BaseMessages.getString(
-                PKG, "JobUnZip.MoveToDirectoryNotExists.Label" ) );
+              log.logError( BaseMessages.getString( PKG, "JobUnZip.MoveToDirectoryNotExists.Label" ) );
               exitjobentry = true;
             }
           }
@@ -418,8 +412,7 @@ public class JobEntryUnZip extends JobEntryBase implements Cloneable, JobEntryIn
       }
 
       if ( isfromprevious ) {
-        if ( rows != null ) // Copy the input row to the (command line) arguments
-        {
+        if ( rows != null ) { // Copy the input row to the (command line) arguments
           for ( int iteration = 0; iteration < rows.size() && !parentJob.isStopped(); iteration++ ) {
             if ( successConditionBroken ) {
               if ( !successConditionBrokenExit ) {
@@ -450,8 +443,7 @@ public class JobEntryUnZip extends JobEntryBase implements Cloneable, JobEntryIn
       } else {
         fileObject = KettleVFS.getFileObject( realFilenameSource, this );
         if ( !fileObject.exists() ) {
-          log.logError( BaseMessages.getString( PKG, "JobUnZip.Error.Label" ), BaseMessages.getString(
-            PKG, "JobUnZip.ZipFile.NotExists.Label", realFilenameSource ) );
+          log.logError(  BaseMessages.getString( PKG, "JobUnZip.ZipFile.NotExists.Label", realFilenameSource ) );
           return result;
         }
 
@@ -459,8 +451,7 @@ public class JobEntryUnZip extends JobEntryBase implements Cloneable, JobEntryIn
           logDetailed( BaseMessages.getString( PKG, "JobUnZip.Zip_FileExists.Label", realFilenameSource ) );
         }
         if ( Const.isEmpty( sourcedirectory ) ) {
-          log.logError( BaseMessages.getString( PKG, "JobUnZip.Error.Label" ), BaseMessages.getString(
-            PKG, "JobUnZip.TargetFolderNotFound.Label" ) );
+          log.logError( BaseMessages.getString( PKG, "JobUnZip.SourceFolderNotFound.Label" ) );
           return result;
         }
 
@@ -469,8 +460,7 @@ public class JobEntryUnZip extends JobEntryBase implements Cloneable, JobEntryIn
           realMovetodirectory, realWildcardSource );
       }
     } catch ( Exception e ) {
-      log.logError( BaseMessages.getString( PKG, "JobUnZip.Error.Label" ), BaseMessages.getString(
-        PKG, "JobUnZip.ErrorUnzip.Label", realFilenameSource, e.getMessage() ) );
+      log.logError( BaseMessages.getString( PKG, "JobUnZip.ErrorUnzip.Label", realFilenameSource, e.getMessage() ) );
       updateErrors();
     } finally {
       if ( fileObject != null ) {
@@ -841,8 +831,8 @@ public class JobEntryUnZip extends JobEntryBase implements Cloneable, JobEntryIn
       retval = true;
     } catch ( Exception e ) {
       updateErrors();
-      log.logError( BaseMessages.getString( PKG, "JobUnZip.Error.Label" ), BaseMessages.getString(
-        PKG, "JobUnZip.ErrorUnzip.Label", sourceFileObject.toString(), e.getMessage() ), e );
+      log.logError( BaseMessages.getString(
+          PKG, "JobUnZip.ErrorUnzip.Label", sourceFileObject.toString(), e.getMessage() ), e );
     }
 
     return retval;
@@ -1294,17 +1284,20 @@ public class JobEntryUnZip extends JobEntryBase implements Cloneable, JobEntryIn
   public void check( List<CheckResultInterface> remarks, JobMeta jobMeta, VariableSpace space,
     Repository repository, IMetaStore metaStore ) {
     ValidatorContext ctx1 = new ValidatorContext();
-    putVariableSpace( ctx1, getVariables() );
-    putValidators( ctx1, notBlankValidator(), fileDoesNotExistValidator() );
+    AbstractFileValidator.putVariableSpace( ctx1, getVariables() );
+    AndValidator.putValidators( ctx1, JobEntryValidatorUtils.notBlankValidator(),
+        JobEntryValidatorUtils.fileDoesNotExistValidator() );
 
-    andValidator().validate( this, "zipFilename", remarks, ctx1 );
+    JobEntryValidatorUtils.andValidator().validate( this, "zipFilename", remarks, ctx1 );
 
     if ( 2 == afterunzip ) {
       // setting says to move
-      andValidator().validate( this, "moveToDirectory", remarks, putValidators( notBlankValidator() ) );
+      JobEntryValidatorUtils.andValidator().validate( this, "moveToDirectory", remarks,
+          AndValidator.putValidators( JobEntryValidatorUtils.notBlankValidator() ) );
     }
 
-    andValidator().validate( this, "sourceDirectory", remarks, putValidators( notBlankValidator() ) );
+    JobEntryValidatorUtils.andValidator().validate( this, "sourceDirectory", remarks,
+        AndValidator.putValidators( JobEntryValidatorUtils.notBlankValidator() ) );
 
   }
 

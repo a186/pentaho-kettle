@@ -24,16 +24,16 @@ export LIBOVERLAY_SCROLLBAR=0
 # Bug in: https://bugs.launchpad.net/ubuntu/+source/unity-gtk-module/+bug/1208019
 export UBUNTU_MENUPROXY=0
 
+# Supposed spoon.sh and set-env.sh files both are located in data-integration folder  
 # **************************************************
-# ** Init BASEDIR                                 **
+# ** Set INITIALDIR, BASEDIR AND CURRENTDIR       **
 # **************************************************
+INITIALDIR=`pwd`
+# set absolute path to data-integration folder
+BASEDIR=$( cd "$( dirname "$0" )" && pwd )
+CURRENTDIR="."
 
-BASEDIR=`dirname $0`
-cd $BASEDIR
-DIR=`pwd`
-cd -
-
-. "$DIR/set-pentaho-env.sh"
+. "$BASEDIR/set-pentaho-env.sh"
 
 setPentahoEnv
 
@@ -42,7 +42,14 @@ setPentahoEnv
 # **************************************************
 
 LIBPATH="NONE"
-STARTUP="$DIR/launcher/launcher.jar"
+STARTUP="$BASEDIR/launcher/launcher.jar"
+
+if [ -z "$IS_YARN" ]; then
+	# Go to directory where spoon.sh located
+	cd $BASEDIR
+else
+	cd "$BASEDIR"
+fi
 
 case `uname -s` in 
 	AIX)
@@ -50,11 +57,11 @@ case `uname -s` in
 		case $ARCH in
 
 			ppc)
-				LIBPATH=$BASEDIR/../libswt/aix/
+				LIBPATH=$CURRENTDIR/../libswt/aix/
 				;;
 
 			ppc64)
-				LIBPATH=$BASEDIR/../libswt/aix64/
+				LIBPATH=$CURRENTDIR/../libswt/aix64/
 				;;
 
 			*)	
@@ -68,30 +75,32 @@ case `uname -s` in
 		case $ARCH in
 
 			i[3-6]86)
-				LIBPATH=$BASEDIR/../libswt/solaris-x86/
+				LIBPATH=$CURRENTDIR/../libswt/solaris-x86/
 				;;
 
 			*)	
-				LIBPATH=$BASEDIR/../libswt/solaris/
+				LIBPATH=$CURRENTDIR/../libswt/solaris/
 				;;
 		esac
 		;;
 
 	Darwin)
     ARCH=`uname -m`
-	OPT="-XstartOnFirstThread $OPT"
+	if [ -z "$IS_KITCHEN" ]; then
+		OPT="-XstartOnFirstThread $OPT"
+	fi
 	case $ARCH in
 		x86_64)
 			if $($_PENTAHO_JAVA -version 2>&1 | grep "64-Bit" > /dev/null )
                             then
-			  LIBPATH=$BASEDIR/../libswt/osx64/
+			  LIBPATH=$CURRENTDIR/../libswt/osx64/
                             else
-			  LIBPATH=$BASEDIR/../libswt/osx/
+			  LIBPATH=$CURRENTDIR/../libswt/osx/
                             fi
 			;;
 
 		i[3-6]86)
-			LIBPATH=$BASEDIR/../libswt/osx/
+			LIBPATH=$CURRENTDIR/../libswt/osx/
 			;;
 
 		*)	
@@ -110,22 +119,22 @@ case `uname -s` in
 			x86_64)
 				if $($_PENTAHO_JAVA -version 2>&1 | grep "64-Bit" > /dev/null )
                                 then
-				  LIBPATH=$BASEDIR/../libswt/linux/x86_64/
+				  LIBPATH=$CURRENTDIR/../libswt/linux/x86_64/
                                 else
-				  LIBPATH=$BASEDIR/../libswt/linux/x86/
+				  LIBPATH=$CURRENTDIR/../libswt/linux/x86/
                                 fi
 				;;
 
 			i[3-6]86)
-				LIBPATH=$BASEDIR/../libswt/linux/x86/
+				LIBPATH=$CURRENTDIR/../libswt/linux/x86/
 				;;
 
 			ppc)
-				LIBPATH=$BASEDIR/../libswt/linux/ppc/
+				LIBPATH=$CURRENTDIR/../libswt/linux/ppc/
 				;;
 
 			ppc64)
-				LIBPATH=$BASEDIR/../libswt/linux/ppc64/
+				LIBPATH=$CURRENTDIR/../libswt/linux/ppc64/
 				;;
 
 			*)	
@@ -141,17 +150,17 @@ case `uname -s` in
 	    ARCH=`uname -m`
 		case $ARCH in
 			x86_64)
-				LIBPATH=$BASEDIR/../libswt/linux/x86_64/
+				LIBPATH=$CURRENTDIR/../libswt/linux/x86_64/
 				echo "I'm sorry, this FreeBSD platform [$ARCH] is not yet supported!"
 				exit
 				;;
 
 			i[3-6]86)
-				LIBPATH=$BASEDIR/../libswt/linux/x86/
+				LIBPATH=$CURRENTDIR/../libswt/linux/x86/
 				;;
 
 			ppc)
-				LIBPATH=$BASEDIR/../libswt/linux/ppc/
+				LIBPATH=$CURRENTDIR/../libswt/linux/ppc/
 				echo "I'm sorry, this FreeBSD platform [$ARCH] is not yet supported!"
 				exit
 				;;
@@ -164,7 +173,7 @@ case `uname -s` in
 		;;
 
 	HP-UX) 
-		LIBPATH=$BASEDIR/../libswt/hpux/
+		LIBPATH=$CURRENTDIR/../libswt/hpux/
 		;;
 	CYGWIN*)
 		./Spoon.bat
@@ -181,15 +190,15 @@ export LIBPATH
 
 # ******************************************************************
 # ** Set java runtime options                                     **
-# ** Change 512m to higher values in case you run out of memory   **
+# ** Change 2048m to higher values in case you run out of memory  **
 # ** or set the PENTAHO_DI_JAVA_OPTIONS environment variable      **
 # ******************************************************************
 
 if [ -z "$PENTAHO_DI_JAVA_OPTIONS" ]; then
-    PENTAHO_DI_JAVA_OPTIONS="-Xmx512m -XX:MaxPermSize=256m"
+    PENTAHO_DI_JAVA_OPTIONS="-Xms1024m -Xmx2048m -XX:MaxPermSize=256m"
 fi
 
-OPT="$OPT $PENTAHO_DI_JAVA_OPTIONS -Djava.library.path=$LIBPATH -DKETTLE_HOME=$KETTLE_HOME -DKETTLE_REPOSITORY=$KETTLE_REPOSITORY -DKETTLE_USER=$KETTLE_USER -DKETTLE_PASSWORD=$KETTLE_PASSWORD -DKETTLE_PLUGIN_PACKAGES=$KETTLE_PLUGIN_PACKAGES -DKETTLE_LOG_SIZE_LIMIT=$KETTLE_LOG_SIZE_LIMIT -DKETTLE_JNDI_ROOT=$KETTLE_JNDI_ROOT"
+OPT="$OPT $PENTAHO_DI_JAVA_OPTIONS -Dhttps.protocols=TLSv1,TLSv1.1,TLSv1.2 -Djava.library.path=$LIBPATH -DKETTLE_HOME=$KETTLE_HOME -DKETTLE_REPOSITORY=$KETTLE_REPOSITORY -DKETTLE_USER=$KETTLE_USER -DKETTLE_PASSWORD=$KETTLE_PASSWORD -DKETTLE_PLUGIN_PACKAGES=$KETTLE_PLUGIN_PACKAGES -DKETTLE_LOG_SIZE_LIMIT=$KETTLE_LOG_SIZE_LIMIT -DKETTLE_JNDI_ROOT=$KETTLE_JNDI_ROOT"
 
 # optional line for attaching a debugger
 # OPT="$OPT -Xdebug -Xnoagent -Djava.compiler=NONE -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5005"
@@ -197,4 +206,20 @@ OPT="$OPT $PENTAHO_DI_JAVA_OPTIONS -Djava.library.path=$LIBPATH -DKETTLE_HOME=$K
 # ***************
 # ** Run...    **
 # ***************
-"$_PENTAHO_JAVA" $OPT -jar "$STARTUP" -lib $LIBPATH "${1+$@}"
+inputtoexitstatus() {
+  read exitstatus
+  return $exitstatus
+}
+
+OS=`uname -s | tr '[:upper:]' '[:lower:]'`
+if [ $OS = "linux" ]; then
+    (((("$_PENTAHO_JAVA" $OPT -jar "$STARTUP" -lib $LIBPATH "${1+$@}"  2>&1; echo $? >&3 ) | grep -viE "Gtk-WARNING|GLib-GObject|GLib-CRITICAL|^$" >&4 ) 3>&1)| inputtoexitstatus ) 4>&1
+else
+    "$_PENTAHO_JAVA" $OPT -jar "$STARTUP" -lib $LIBPATH "${1+$@}"
+fi
+EXIT_CODE=$?
+
+# return to the catalog from which spoon.sh has been started
+cd $INITIALDIR
+
+exit $EXIT_CODE

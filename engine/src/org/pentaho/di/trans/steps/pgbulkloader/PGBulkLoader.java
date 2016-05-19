@@ -32,7 +32,7 @@ package org.pentaho.di.trans.steps.pgbulkloader;
 
 import java.math.BigDecimal;
 
-import org.apache.commons.vfs.FileObject;
+import org.apache.commons.vfs2.FileObject;
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.database.DatabaseMeta;
 import org.pentaho.di.core.exception.KettleException;
@@ -82,7 +82,7 @@ public class PGBulkLoader extends BaseStep implements StepInterface {
 
     String loadAction = environmentSubstitute( meta.getLoadAction() );
 
-    StringBuffer contents = new StringBuffer( 500 );
+    StringBuilder contents = new StringBuilder( 500 );
 
     String tableName =
       dm.getQuotedSchemaTableCombination(
@@ -150,7 +150,7 @@ public class PGBulkLoader extends BaseStep implements StepInterface {
    *           Upon any exception
    */
   public String createCommandLine( PGBulkLoaderMeta meta, boolean password ) throws KettleException {
-    StringBuffer sb = new StringBuffer( 300 );
+    StringBuilder sb = new StringBuilder( 300 );
 
     if ( meta.getPsqlpath() != null ) {
       try {

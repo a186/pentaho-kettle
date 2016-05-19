@@ -22,7 +22,7 @@
 
 package org.pentaho.di.core.logging;
 
-import static org.pentaho.di.core.Const.KETTLE_LOG_MARK_MAPPINGS;
+import org.pentaho.di.core.Const;
 
 import java.text.MessageFormat;
 import java.util.ArrayList;
@@ -78,7 +78,7 @@ public class LogMessage implements LogMessageInterface {
     // Derive the subject from the registry
     //
     LoggingObjectInterface loggingObject = LoggingRegistry.getInstance().getLoggingObject( logChannelId );
-    boolean detailedLogTurnOn = "Y".equals( EnvUtil.getSystemProperty( KETTLE_LOG_MARK_MAPPINGS ) ) ? true : false;
+    boolean detailedLogTurnOn = "Y".equals( EnvUtil.getSystemProperty( Const.KETTLE_LOG_MARK_MAPPINGS ) ) ? true : false;
     if ( loggingObject != null ) {
       if ( !detailedLogTurnOn ) {
         subject = loggingObject.getObjectName();
@@ -118,7 +118,7 @@ public class LogMessage implements LogMessageInterface {
    */
   private String formatDetailedSubject( List<String> subjects ) {
 
-    StringBuffer string = new StringBuffer();
+    StringBuilder string = new StringBuilder();
 
     int currentStep = 0;
     int rootStep = subjects.size() - 1;
@@ -131,6 +131,7 @@ public class LogMessage implements LogMessageInterface {
   }
 
   @Override
+  @Deprecated
   public String toString() {
     if ( message == null ) {
       return subject;
@@ -147,22 +148,28 @@ public class LogMessage implements LogMessageInterface {
     return level;
   }
 
+  @Deprecated
   public void setLevel( LogLevel level ) {
     this.level = level;
   }
 
   /**
-   * @return the message
+   * @return The formatted message.
    */
   @Override
   public String getMessage() {
-    return message;
+    if ( arguments != null && arguments.length > 0 ) {
+      return MessageFormat.format( message, arguments );
+    } else {
+      return message;
+    }
   }
 
   /**
    * @param message
    *          the message to set
    */
+  @Deprecated
   public void setMessage( String message ) {
     this.message = message;
   }
@@ -179,6 +186,7 @@ public class LogMessage implements LogMessageInterface {
    * @param subject
    *          the subject to set
    */
+  @Deprecated
   public void setSubject( String subject ) {
     this.subject = subject;
   }
@@ -195,6 +203,7 @@ public class LogMessage implements LogMessageInterface {
    * @param logChannelId
    *          the logChannelId to set
    */
+  @Deprecated
   public void setLogChannelId( String logChannelId ) {
     this.logChannelId = logChannelId;
   }
@@ -211,6 +220,7 @@ public class LogMessage implements LogMessageInterface {
    * @param arguments
    *          the arguments to set
    */
+  @Deprecated
   public void setArguments( Object[] arguments ) {
     this.arguments = arguments;
   }

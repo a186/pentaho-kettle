@@ -34,7 +34,7 @@ public class OpenERPObjectDelete extends BaseStep implements StepInterface {
   private int idIndex;
 
   public OpenERPObjectDelete( StepMeta stepMeta, StepDataInterface stepDataInterface, int copyNr, TransMeta transMeta,
-      Trans trans ) {
+                              Trans trans ) {
     super( stepMeta, stepDataInterface, copyNr, transMeta, trans );
   }
 
@@ -58,15 +58,15 @@ public class OpenERPObjectDelete extends BaseStep implements StepInterface {
     if ( first ) {
       // Set to import the id field if this step is an update step
       // Must be the first field
-      if ( meta.getIdFieldName() == null || meta.getIdFieldName() == "" )
+      if ( meta.getIdFieldName() == null || meta.getIdFieldName().equals( "" ) ) {
         idIndex = -1;
-      else
+      } else {
         idIndex = getInputRowMeta().indexOfValue( meta.getIdFieldName() );
-
-      if ( idIndex == -1 )
+      }
+      if ( idIndex == -1 ) {
         throw new KettleException( "Failed to initialize step ", new Exception(
-            "Could not find ID field from input step with name: '" + meta.getIdFieldName() + "'" ) );
-
+          "Could not find ID field from input step with name: '" + meta.getIdFieldName() + "'" ) );
+      }
       first = false;
       data.batchRows.clear();
     }
@@ -76,10 +76,11 @@ public class OpenERPObjectDelete extends BaseStep implements StepInterface {
       // Why not use the getInteger function on the valueMeta? Because it returns a long and the
       // OpenERP XMLRPC interface doesn't support extended attributes (that includes long values).
       data.batchRows.add( Integer.parseInt( this.getInputRowMeta().getValueMeta( idIndex )
-          .getString( inputRow[idIndex] ) ) );
+        .getString( inputRow[idIndex] ) ) );
 
-      if ( data.batchRows.size() == meta.getCommitBatchSize() )
+      if ( data.batchRows.size() == meta.getCommitBatchSize() ) {
         CommitBatch();
+      }
 
     } catch ( Exception e ) {
       throw new KettleException( "Failed to commit batch: " + row, e );
@@ -91,8 +92,9 @@ public class OpenERPObjectDelete extends BaseStep implements StepInterface {
   private void CommitBatch() throws Exception {
     try {
       data.helper.deleteObjects( meta.getModelName(), data.batchRows );
-      for ( int i = 0; i < data.batchRows.size(); i++ )
+      for ( int i = 0; i < data.batchRows.size(); i++ ) {
         incrementLinesOutput();
+      }
     } finally {
       data.batchRows.clear();
     }

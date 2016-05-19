@@ -26,7 +26,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.commons.vfs.FileObject;
+import org.apache.commons.vfs2.FileObject;
 import org.pentaho.di.core.CheckResult;
 import org.pentaho.di.core.CheckResultInterface;
 import org.pentaho.di.core.Const;
@@ -107,7 +107,12 @@ public class ParGzipCsvInputMeta extends BaseStepMeta implements StepMetaInterfa
   }
 
   public Object clone() {
-    Object retval = super.clone();
+    ParGzipCsvInputMeta retval = (ParGzipCsvInputMeta) super.clone();
+    int nrFields = inputFields.length;
+    retval.allocate( nrFields );
+    for ( int i = 0; i < nrFields; i++ ) {
+      retval.inputFields[ i ] = (TextFileInputField) inputFields [ i ].clone();
+    }
     return retval;
   }
 
@@ -165,7 +170,7 @@ public class ParGzipCsvInputMeta extends BaseStepMeta implements StepMetaInterfa
   }
 
   public String getXML() {
-    StringBuffer retval = new StringBuffer( 500 );
+    StringBuilder retval = new StringBuilder( 500 );
 
     retval.append( "    " ).append( XMLHandler.addTagValue( "filename", filename ) );
     retval.append( "    " ).append( XMLHandler.addTagValue( "filename_field", filenameField ) );

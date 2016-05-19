@@ -43,6 +43,7 @@ import org.pentaho.di.core.row.ValueMetaInterface;
 import org.pentaho.di.i18n.BaseMessages;
 import org.pentaho.di.job.JobHopMeta;
 import org.pentaho.di.job.JobMeta;
+import org.pentaho.di.job.entries.missing.MissingEntry;
 import org.pentaho.di.job.entry.JobEntryCopy;
 import org.pentaho.di.job.entry.JobEntryInterface;
 import org.pentaho.di.repository.LongObjectId;
@@ -442,7 +443,6 @@ public class KettleDatabaseRepositoryJobDelegate extends KettleDatabaseRepositor
           // Keep a unique list of job entries to facilitate in the loading.
           //
           List<JobEntryInterface> jobentries = new ArrayList<JobEntryInterface>();
-
           if ( log.isDetailed() ) {
             log.logDetailed( "Loading " + jecids.length + " job entries" );
           }
@@ -455,7 +455,11 @@ public class KettleDatabaseRepositoryJobDelegate extends KettleDatabaseRepositor
             JobEntryCopy jec =
               repository.jobEntryDelegate.loadJobEntryCopy(
                 jobMeta.getObjectId(), jecids[i], jobentries, jobMeta.getDatabases(), jobMeta
-                  .getSlaveServers() );
+                  .getSlaveServers(), jobname );
+
+            if ( jec.isMissing() ) {
+              jobMeta.addMissingEntry( (MissingEntry) jec.getEntry() );
+            }
 
             // Also set the copy number...
             // We count the number of job entry copies that use the job
@@ -1077,7 +1081,7 @@ public class KettleDatabaseRepositoryJobDelegate extends KettleDatabaseRepositor
         final String value = attributes.get( key );
         if ( key != null && value != null ) {
           repository.connectionDelegate.insertJobAttribute( jobId, 0, JOB_ATTRIBUTE_PREFIX
-            + groupName + '\t' + value, 0, value );
+            + groupName + '\t' + key, 0, value );
         }
       }
     }

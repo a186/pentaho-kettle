@@ -46,6 +46,7 @@ import org.pentaho.di.core.plugins.PartitionerPluginType;
 import org.pentaho.di.core.plugins.PluginInterface;
 import org.pentaho.di.core.plugins.PluginRegistry;
 import org.pentaho.di.core.row.RowMetaInterface;
+import org.pentaho.di.core.util.StringUtil;
 import org.pentaho.di.i18n.BaseMessages;
 import org.pentaho.di.trans.ModPartitioner;
 import org.pentaho.di.trans.TransMeta;
@@ -69,7 +70,7 @@ public class ModPartitionerDialog extends BaseStepDialog implements StepDialogIn
   private FormData fdlFieldname, fdFieldname;
 
   public ModPartitionerDialog( Shell parent, StepMeta stepMeta, StepPartitioningMeta partitioningMeta,
-    TransMeta transMeta ) {
+                               TransMeta transMeta ) {
     super( parent, (BaseStepMeta) stepMeta.getStepMetaInterface(), transMeta, partitioningMeta
       .getPartitioner().getDescription() );
     this.stepMeta = stepMeta;
@@ -121,13 +122,13 @@ public class ModPartitionerDialog extends BaseStepDialog implements StepDialogIn
     fdFieldname.top = new FormAttachment( 0, margin );
     fdFieldname.right = new FormAttachment( 100, 0 );
     wFieldname.setLayoutData( fdFieldname );
-
     try {
       RowMetaInterface inputFields = transMeta.getPrevStepFields( stepMeta );
       if ( inputFields != null ) {
         String[] fieldNames = inputFields.getFieldNames();
         Arrays.sort( fieldNames );
         wFieldname.setItems( fieldNames );
+
       }
     } catch ( Exception e ) {
       new ErrorDialog( shell, "Error", "Error obtaining list of input fields:", e );
@@ -176,6 +177,13 @@ public class ModPartitionerDialog extends BaseStepDialog implements StepDialogIn
     partitioningMeta.hasChanged( changed );
 
     setSize();
+    wOK.setEnabled( !StringUtil.isEmpty( wFieldname.getText() ) );
+    ModifyListener modifyListener = new ModifyListener() {
+      @Override public void modifyText( ModifyEvent modifyEvent ) {
+        wOK.setEnabled( !StringUtil.isEmpty( wFieldname.getText() ) );
+      }
+    };
+    wFieldname.addModifyListener( modifyListener );
 
     shell.open();
     while ( !shell.isDisposed() ) {

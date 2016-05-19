@@ -33,7 +33,11 @@ import org.pentaho.di.core.database.Database;
 import org.pentaho.di.core.database.DatabaseMeta;
 import org.pentaho.di.core.exception.KettleException;
 import org.pentaho.di.core.exception.KettleStepException;
+import org.pentaho.di.core.exception.KettleValueException;
 import org.pentaho.di.core.exception.KettleXMLException;
+import org.pentaho.di.core.injection.Injection;
+import org.pentaho.di.core.injection.InjectionSupported;
+import org.pentaho.di.core.injection.InjectionTypeConverter;
 import org.pentaho.di.core.row.RowMeta;
 import org.pentaho.di.core.row.RowMetaInterface;
 import org.pentaho.di.core.row.ValueMetaInterface;
@@ -71,8 +75,9 @@ import org.w3c.dom.Node;
  *
  * @author Matt Casters<br>
  */
+@InjectionSupported( localizationPrefix = "MySQLBulkLoader.Injection.", groups = { "FIELDS" } )
 public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterface,
-  ProvidesDatabaseConnectionInformation {
+    ProvidesDatabaseConnectionInformation {
   private static Class<?> PKG = MySQLBulkLoaderMeta.class; // for i18n purposes, needed by Translator2!!
 
   public static final int FIELD_FORMAT_TYPE_OK = 0;
@@ -90,53 +95,63 @@ public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterfa
     BaseMessages.getString( PKG, "MySQLBulkLoaderMeta.FieldFormatType.StringEscape.Description" ), };
 
   /** what's the schema for the target? */
+  @Injection( name = "SCHEMA_NAME" )
   private String schemaName;
 
   /** what's the table for the target? */
+  @Injection( name = "TABLE_NAME" )
   private String tableName;
 
   /** The name of the FIFO file to create */
+  @Injection( name = "FIFO_FILE" )
   private String fifoFileName;
 
   /** database connection */
   private DatabaseMeta databaseMeta;
 
   /** Field name of the target table */
+  @Injection( name = "FIELD_TABLE", group = "FIELDS" )
   private String[] fieldTable;
 
   /** Field name in the stream */
+  @Injection( name = "FIELD_STREAM", group = "FIELDS" )
   private String[] fieldStream;
 
   /** flag to indicate what to do with the formatting */
+  @Injection( name = "FIELD_FORMAT", group = "FIELDS", converter = FieldFormatTypeConverter.class )
   private int[] fieldFormatType;
 
   /** Encoding to use */
+  @Injection( name = "ENCODING" )
   private String encoding;
 
   /** REPLACE clause flag */
+  @Injection( name = "USE_REPLACE_CLAUSE" )
   private boolean replacingData;
 
   /** IGNORE clause flag */
+  @Injection( name = "USE_IGNORE_CLAUSE" )
   private boolean ignoringErrors;
 
   /** allows specification of the LOCAL clause */
+  @Injection( name = "LOCAL_FILE" )
   private boolean localFile;
 
   /** The delimiter to use */
+  @Injection( name = "DELIMITER" )
   private String delimiter;
 
   /** The enclosure to use */
+  @Injection( name = "ENCLOSURE" )
   private String enclosure;
 
   /** The escape character */
+  @Injection( name = "ESCAPE_CHAR" )
   private String escapeChar;
 
   /** The number of rows to load per bulk statement */
+  @Injection( name = "BULK_SIZE" )
   private String bulkSize;
-
-  public MySQLBulkLoaderMeta() {
-    super();
-  }
 
   /**
    * @return Returns the database.
@@ -213,11 +228,10 @@ public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterfa
     int nrvalues = fieldTable.length;
 
     retval.allocate( nrvalues );
+    System.arraycopy( fieldTable, 0, retval.fieldTable, 0, nrvalues );
+    System.arraycopy( fieldStream, 0, retval.fieldStream, 0, nrvalues );
+    System.arraycopy( fieldFormatType, 0, retval.fieldFormatType, 0, nrvalues );
 
-    for ( int i = 0; i < nrvalues; i++ ) {
-      retval.fieldTable[i] = fieldTable[i];
-      retval.fieldStream[i] = fieldStream[i];
-    }
     return retval;
   }
 
@@ -253,11 +267,11 @@ public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterfa
         if ( fieldStream[i] == null ) {
           fieldStream[i] = fieldTable[i]; // default: the same name!
         }
-        fieldFormatType[i] = getFieldFormatType( XMLHandler.getTagValue( vnode, "field_format_type" ) );
+        fieldFormatType[i] = getFieldFormatType( XMLHandler.getTagValue( vnode, "field_format_ok" ) );
       }
     } catch ( Exception e ) {
-      throw new KettleXMLException( BaseMessages.getString(
-        PKG, "MySQLBulkLoaderMeta.Exception.UnableToReadStepInfoFromXML" ), e );
+      throw new KettleXMLException( BaseMessages.getString( PKG,
+          "MySQLBulkLoaderMeta.Exception.UnableToReadStepInfoFromXML" ), e );
     }
   }
 
@@ -280,10 +294,9 @@ public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterfa
   }
 
   public String getXML() {
-    StringBuffer retval = new StringBuffer( 300 );
+    StringBuilder retval = new StringBuilder( 300 );
 
-    retval
-      .append( "    " ).append(
+    retval.append( "    " ).append(
         XMLHandler.addTagValue( "connection", databaseMeta == null ? "" : databaseMeta.getName() ) );
     retval.append( "    " ).append( XMLHandler.addTagValue( "schema", schemaName ) );
     retval.append( "    " ).append( XMLHandler.addTagValue( "table", tableName ) );
@@ -302,14 +315,15 @@ public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterfa
       retval.append( "        " ).append( XMLHandler.addTagValue( "stream_name", fieldTable[i] ) );
       retval.append( "        " ).append( XMLHandler.addTagValue( "field_name", fieldStream[i] ) );
       retval.append( "        " ).append(
-        XMLHandler.addTagValue( "field_format_ok", getFieldFormatTypeCode( fieldFormatType[i] ) ) );
+          XMLHandler.addTagValue( "field_format_ok", getFieldFormatTypeCode( fieldFormatType[i] ) ) );
       retval.append( "      </mapping>" ).append( Const.CR );
     }
 
     return retval.toString();
   }
 
-  public void readRep( Repository rep, IMetaStore metaStore, ObjectId id_step, List<DatabaseMeta> databases ) throws KettleException {
+  public void readRep( Repository rep, IMetaStore metaStore, ObjectId id_step, List<DatabaseMeta> databases )
+    throws KettleException {
     try {
       databaseMeta = rep.loadDatabaseMetaFromStepAttribute( id_step, "id_connection", databases );
       schemaName = rep.getStepAttributeString( id_step, "schema" );
@@ -334,15 +348,16 @@ public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterfa
         if ( fieldStream[i] == null ) {
           fieldStream[i] = fieldTable[i];
         }
-        fieldFormatType[i] = getFieldFormatType( rep.getStepAttributeString( id_step, i, "field_format_type" ) );
+        fieldFormatType[i] = getFieldFormatType( rep.getStepAttributeString( id_step, i, "field_format_ok" ) );
       }
     } catch ( Exception e ) {
-      throw new KettleException( BaseMessages.getString(
-        PKG, "MySQLBulkLoaderMeta.Exception.UnexpectedErrorReadingStepInfoFromRepository" ), e );
+      throw new KettleException( BaseMessages.getString( PKG,
+          "MySQLBulkLoaderMeta.Exception.UnexpectedErrorReadingStepInfoFromRepository" ), e );
     }
   }
 
-  public void saveRep( Repository rep, IMetaStore metaStore, ObjectId id_transformation, ObjectId id_step ) throws KettleException {
+  public void saveRep( Repository rep, IMetaStore metaStore, ObjectId id_transformation, ObjectId id_step )
+    throws KettleException {
     try {
       rep.saveDatabaseMetaStepAttribute( id_transformation, id_step, "id_connection", databaseMeta );
       rep.saveStepAttribute( id_transformation, id_step, "schema", schemaName );
@@ -360,8 +375,8 @@ public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterfa
       for ( int i = 0; i < fieldTable.length; i++ ) {
         rep.saveStepAttribute( id_transformation, id_step, i, "stream_name", fieldTable[i] );
         rep.saveStepAttribute( id_transformation, id_step, i, "field_name", fieldStream[i] );
-        rep.saveStepAttribute(
-          id_transformation, id_step, i, "field_format_ok", getFieldFormatTypeCode( fieldFormatType[i] ) );
+        rep.saveStepAttribute( id_transformation, id_step, i, "field_format_ok",
+            getFieldFormatTypeCode( fieldFormatType[i] ) );
       }
 
       // Also, save the step-database relationship!
@@ -369,20 +384,20 @@ public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterfa
         rep.insertStepDatabase( id_transformation, id_step, databaseMeta.getObjectId() );
       }
     } catch ( Exception e ) {
-      throw new KettleException( BaseMessages.getString(
-        PKG, "MySQLBulkLoaderMeta.Exception.UnableToSaveStepInfoToRepository" )
-        + id_step, e );
+      throw new KettleException( BaseMessages.getString( PKG,
+          "MySQLBulkLoaderMeta.Exception.UnableToSaveStepInfoToRepository" )
+          + id_step, e );
     }
   }
 
   public void getFields( RowMetaInterface rowMeta, String origin, RowMetaInterface[] info, StepMeta nextStep,
-    VariableSpace space, Repository repository, IMetaStore metaStore ) throws KettleStepException {
+      VariableSpace space, Repository repository, IMetaStore metaStore ) throws KettleStepException {
     // Default: nothing changes to rowMeta
   }
 
-  public void check( List<CheckResultInterface> remarks, TransMeta transMeta, StepMeta stepMeta,
-    RowMetaInterface prev, String[] input, String[] output, RowMetaInterface info, VariableSpace space,
-    Repository repository, IMetaStore metaStore ) {
+  public void check( List<CheckResultInterface> remarks, TransMeta transMeta, StepMeta stepMeta, RowMetaInterface prev,
+      String[] input, String[] output, RowMetaInterface info, VariableSpace space, Repository repository,
+      IMetaStore metaStore ) {
     CheckResult cr;
     String error_message = "";
 
@@ -394,8 +409,8 @@ public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterfa
 
         if ( !Const.isEmpty( tableName ) ) {
           cr =
-            new CheckResult( CheckResultInterface.TYPE_RESULT_OK, BaseMessages.getString(
-              PKG, "MySQLBulkLoaderMeta.CheckResult.TableNameOK" ), stepMeta );
+              new CheckResult( CheckResultInterface.TYPE_RESULT_OK, BaseMessages.getString( PKG,
+                  "MySQLBulkLoaderMeta.CheckResult.TableNameOK" ), stepMeta );
           remarks.add( cr );
 
           boolean first = true;
@@ -404,13 +419,13 @@ public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterfa
 
           // Check fields in table
           String schemaTable =
-            databaseMeta.getQuotedSchemaTableCombination(
-              transMeta.environmentSubstitute( schemaName ), transMeta.environmentSubstitute( tableName ) );
+              databaseMeta.getQuotedSchemaTableCombination( transMeta.environmentSubstitute( schemaName ), transMeta
+                  .environmentSubstitute( tableName ) );
           RowMetaInterface r = db.getTableFields( schemaTable );
           if ( r != null ) {
             cr =
-              new CheckResult( CheckResultInterface.TYPE_RESULT_OK, BaseMessages.getString(
-                PKG, "MySQLBulkLoaderMeta.CheckResult.TableExists" ), stepMeta );
+                new CheckResult( CheckResultInterface.TYPE_RESULT_OK, BaseMessages.getString( PKG,
+                    "MySQLBulkLoaderMeta.CheckResult.TableExists" ), stepMeta );
             remarks.add( cr );
 
             // How about the fields to insert/dateMask in the table?
@@ -426,9 +441,8 @@ public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterfa
                 if ( first ) {
                   first = false;
                   error_message +=
-                    BaseMessages.getString(
-                      PKG, "MySQLBulkLoaderMeta.CheckResult.MissingFieldsToLoadInTargetTable" )
-                      + Const.CR;
+                      BaseMessages.getString( PKG, "MySQLBulkLoaderMeta.CheckResult.MissingFieldsToLoadInTargetTable" )
+                          + Const.CR;
                 }
                 error_found = true;
                 error_message += "\t\t" + field + Const.CR;
@@ -438,8 +452,8 @@ public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterfa
               cr = new CheckResult( CheckResultInterface.TYPE_RESULT_ERROR, error_message, stepMeta );
             } else {
               cr =
-                new CheckResult( CheckResultInterface.TYPE_RESULT_OK, BaseMessages.getString(
-                  PKG, "MySQLBulkLoaderMeta.CheckResult.AllFieldsFoundInTargetTable" ), stepMeta );
+                  new CheckResult( CheckResultInterface.TYPE_RESULT_OK, BaseMessages.getString( PKG,
+                      "MySQLBulkLoaderMeta.CheckResult.AllFieldsFoundInTargetTable" ), stepMeta );
             }
             remarks.add( cr );
           } else {
@@ -452,8 +466,8 @@ public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterfa
         // Look up fields in the input stream <prev>
         if ( prev != null && prev.size() > 0 ) {
           cr =
-            new CheckResult( CheckResultInterface.TYPE_RESULT_OK, BaseMessages.getString(
-              PKG, "MySQLBulkLoaderMeta.CheckResult.StepReceivingDatas", prev.size() + "" ), stepMeta );
+              new CheckResult( CheckResultInterface.TYPE_RESULT_OK, BaseMessages.getString( PKG,
+                  "MySQLBulkLoaderMeta.CheckResult.StepReceivingDatas", prev.size() + "" ), stepMeta );
           remarks.add( cr );
 
           boolean first = true;
@@ -466,8 +480,7 @@ public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterfa
               if ( first ) {
                 first = false;
                 error_message +=
-                  BaseMessages.getString( PKG, "MySQLBulkLoaderMeta.CheckResult.MissingFieldsInInput" )
-                    + Const.CR;
+                    BaseMessages.getString( PKG, "MySQLBulkLoaderMeta.CheckResult.MissingFieldsInInput" ) + Const.CR;
               }
               error_found = true;
               error_message += "\t\t" + fieldStream[i] + Const.CR;
@@ -477,20 +490,19 @@ public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterfa
             cr = new CheckResult( CheckResultInterface.TYPE_RESULT_ERROR, error_message, stepMeta );
           } else {
             cr =
-              new CheckResult( CheckResultInterface.TYPE_RESULT_OK, BaseMessages.getString(
-                PKG, "MySQLBulkLoaderMeta.CheckResult.AllFieldsFoundInInput" ), stepMeta );
+                new CheckResult( CheckResultInterface.TYPE_RESULT_OK, BaseMessages.getString( PKG,
+                    "MySQLBulkLoaderMeta.CheckResult.AllFieldsFoundInInput" ), stepMeta );
           }
           remarks.add( cr );
         } else {
           error_message =
-            BaseMessages.getString( PKG, "MySQLBulkLoaderMeta.CheckResult.MissingFieldsInInput3" ) + Const.CR;
+              BaseMessages.getString( PKG, "MySQLBulkLoaderMeta.CheckResult.MissingFieldsInInput3" ) + Const.CR;
           cr = new CheckResult( CheckResultInterface.TYPE_RESULT_ERROR, error_message, stepMeta );
           remarks.add( cr );
         }
       } catch ( KettleException e ) {
         error_message =
-          BaseMessages.getString( PKG, "MySQLBulkLoaderMeta.CheckResult.DatabaseErrorOccurred" )
-            + e.getMessage();
+            BaseMessages.getString( PKG, "MySQLBulkLoaderMeta.CheckResult.DatabaseErrorOccurred" ) + e.getMessage();
         cr = new CheckResult( CheckResultInterface.TYPE_RESULT_ERROR, error_message, stepMeta );
         remarks.add( cr );
       } finally {
@@ -505,19 +517,19 @@ public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterfa
     // See if we have input streams leading to this step!
     if ( input.length > 0 ) {
       cr =
-        new CheckResult( CheckResultInterface.TYPE_RESULT_OK, BaseMessages.getString(
-          PKG, "MySQLBulkLoaderMeta.CheckResult.StepReceivingInfoFromOtherSteps" ), stepMeta );
+          new CheckResult( CheckResultInterface.TYPE_RESULT_OK, BaseMessages.getString( PKG,
+              "MySQLBulkLoaderMeta.CheckResult.StepReceivingInfoFromOtherSteps" ), stepMeta );
       remarks.add( cr );
     } else {
       cr =
-        new CheckResult( CheckResultInterface.TYPE_RESULT_ERROR, BaseMessages.getString(
-          PKG, "MySQLBulkLoaderMeta.CheckResult.NoInputError" ), stepMeta );
+          new CheckResult( CheckResultInterface.TYPE_RESULT_ERROR, BaseMessages.getString( PKG,
+              "MySQLBulkLoaderMeta.CheckResult.NoInputError" ), stepMeta );
       remarks.add( cr );
     }
   }
 
   public SQLStatement getSQLStatements( TransMeta transMeta, StepMeta stepMeta, RowMetaInterface prev,
-    Repository repository, IMetaStore metaStore ) throws KettleStepException {
+      Repository repository, IMetaStore metaStore ) throws KettleStepException {
     SQLStatement retval = new SQLStatement( stepMeta.getName(), databaseMeta, null ); // default: nothing to do!
 
     if ( databaseMeta != null ) {
@@ -544,8 +556,8 @@ public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterfa
             db.connect();
 
             String schemaTable =
-              databaseMeta.getQuotedSchemaTableCombination(
-                transMeta.environmentSubstitute( schemaName ), transMeta.environmentSubstitute( tableName ) );
+                databaseMeta.getQuotedSchemaTableCombination( transMeta.environmentSubstitute( schemaName ), transMeta
+                    .environmentSubstitute( tableName ) );
             String cr_table = db.getDDL( schemaTable, tableFields, null, false, null, true );
 
             String sql = cr_table;
@@ -555,8 +567,8 @@ public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterfa
               retval.setSQL( sql );
             }
           } catch ( KettleException e ) {
-            retval.setError( BaseMessages.getString( PKG, "MySQLBulkLoaderMeta.GetSQL.ErrorOccurred" )
-              + e.getMessage() );
+            retval
+                .setError( BaseMessages.getString( PKG, "MySQLBulkLoaderMeta.GetSQL.ErrorOccurred" ) + e.getMessage() );
           }
         } else {
           retval.setError( BaseMessages.getString( PKG, "MySQLBulkLoaderMeta.GetSQL.NoTableDefinedOnConnection" ) );
@@ -572,8 +584,8 @@ public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterfa
   }
 
   public void analyseImpact( List<DatabaseImpact> impact, TransMeta transMeta, StepMeta stepMeta,
-    RowMetaInterface prev, String[] input, String[] output, RowMetaInterface info, Repository repository,
-    IMetaStore metaStore ) throws KettleStepException {
+      RowMetaInterface prev, String[] input, String[] output, RowMetaInterface info, Repository repository,
+      IMetaStore metaStore ) throws KettleStepException {
     if ( prev != null ) {
       /* DEBUG CHECK THIS */
       // Insert dateMask fields : read/write
@@ -581,17 +593,16 @@ public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterfa
         ValueMetaInterface v = prev.searchValueMeta( fieldStream[i] );
 
         DatabaseImpact ii =
-          new DatabaseImpact(
-            DatabaseImpact.TYPE_IMPACT_READ_WRITE, transMeta.getName(), stepMeta.getName(), databaseMeta
-              .getDatabaseName(), transMeta.environmentSubstitute( tableName ), fieldTable[i],
-            fieldStream[i], v != null ? v.getOrigin() : "?", "", "Type = " + v.toStringMeta() );
+            new DatabaseImpact( DatabaseImpact.TYPE_IMPACT_READ_WRITE, transMeta.getName(), stepMeta.getName(),
+                databaseMeta.getDatabaseName(), transMeta.environmentSubstitute( tableName ), fieldTable[i],
+                fieldStream[i], v != null ? v.getOrigin() : "?", "", "Type = " + v.toStringMeta() );
         impact.add( ii );
       }
     }
   }
 
-  public StepInterface getStep( StepMeta stepMeta, StepDataInterface stepDataInterface, int cnr,
-    TransMeta transMeta, Trans trans ) {
+  public StepInterface getStep( StepMeta stepMeta, StepDataInterface stepDataInterface, int cnr, TransMeta transMeta,
+      Trans trans ) {
     return new MySQLBulkLoader( stepMeta, stepDataInterface, cnr, transMeta, trans );
   }
 
@@ -626,18 +637,15 @@ public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterfa
             throw new KettleException( BaseMessages.getString( PKG, "MySQLBulkLoaderMeta.Exception.TableNotFound" ) );
           }
         } else {
-          throw new KettleException( BaseMessages.getString(
-            PKG, "MySQLBulkLoaderMeta.Exception.TableNotSpecified" ) );
+          throw new KettleException( BaseMessages.getString( PKG, "MySQLBulkLoaderMeta.Exception.TableNotSpecified" ) );
         }
       } catch ( Exception e ) {
-        throw new KettleException( BaseMessages
-          .getString( PKG, "MySQLBulkLoaderMeta.Exception.ErrorGettingFields" ), e );
+        throw new KettleException( BaseMessages.getString( PKG, "MySQLBulkLoaderMeta.Exception.ErrorGettingFields" ), e );
       } finally {
         db.disconnect();
       }
     } else {
-      throw new KettleException( BaseMessages
-        .getString( PKG, "MySQLBulkLoaderMeta.Exception.ConnectionNotDefined" ) );
+      throw new KettleException( BaseMessages.getString( PKG, "MySQLBulkLoaderMeta.Exception.ConnectionNotDefined" ) );
     }
 
   }
@@ -815,4 +823,15 @@ public class MySQLBulkLoaderMeta extends BaseStepMeta implements StepMetaInterfa
     return null;
   }
 
+  public static class FieldFormatTypeConverter extends InjectionTypeConverter {
+    @Override
+    public int string2intPrimitive( String v ) throws KettleValueException {
+      for ( int i = 0; i < fieldFormatTypeCodes.length; i++ ) {
+        if ( fieldFormatTypeCodes[i].equalsIgnoreCase( v ) ) {
+          return i;
+        }
+      }
+      return FIELD_FORMAT_TYPE_OK;
+    }
+  }
 }

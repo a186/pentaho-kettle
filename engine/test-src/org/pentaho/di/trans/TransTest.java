@@ -1,32 +1,73 @@
+/*! ******************************************************************************
+ *
+ * Pentaho Data Integration
+ *
+ * Copyright (C) 2002-2016 by Pentaho : http://www.pentaho.com
+ *
+ *******************************************************************************
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ******************************************************************************/
+
 package org.pentaho.di.trans;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.fail;
+import static org.mockito.Matchers.any;
+import static org.mockito.Mockito.doCallRealMethod;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URISyntaxException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Map.Entry;
 import java.util.concurrent.CountDownLatch;
 
-import junit.framework.Assert;
-
 import org.apache.commons.io.IOUtils;
-import org.apache.commons.vfs.FileObject;
-import org.apache.tools.ant.filters.StringInputStream;
+import org.apache.commons.vfs2.FileObject;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.mockito.Mockito;
 import org.pentaho.di.core.KettleEnvironment;
 import org.pentaho.di.core.ProgressMonitorListener;
+import org.pentaho.di.core.database.Database;
 import org.pentaho.di.core.database.DatabaseMeta;
 import org.pentaho.di.core.exception.KettleException;
 import org.pentaho.di.core.logging.LogChannel;
 import org.pentaho.di.core.logging.LogChannelInterface;
+import org.pentaho.di.core.logging.StepLogTable;
+import org.pentaho.di.core.variables.VariableSpace;
 import org.pentaho.di.core.vfs.KettleVFS;
 import org.pentaho.di.repository.Repository;
 import org.pentaho.di.repository.RepositoryDirectoryInterface;
+import org.pentaho.di.trans.step.StepMeta;
+import org.pentaho.di.trans.step.StepMetaChangeListenerInterface;
+import org.pentaho.di.trans.step.StepMetaDataCombi;
+import org.pentaho.di.trans.steps.metainject.MetaInjectMeta;
+import org.pentaho.di.trans.steps.metainject.SourceStepField;
+import org.pentaho.di.trans.steps.metainject.TargetStepAttribute;
 
 public class TransTest {
 
@@ -61,9 +102,9 @@ public class TransTest {
     meta.addDatabase( dbMeta2 );
 
     DatabaseMeta databaseMeta = meta.findDatabase( dbMeta1.getDisplayName() );
-    Assert.assertNotNull( databaseMeta );
-    Assert.assertEquals( databaseMeta.getName(), "encoded_DBConnection" );
-    Assert.assertEquals( databaseMeta.getDisplayName(), "encoded.DBConnection" );
+    assertNotNull( databaseMeta );
+    assertEquals( databaseMeta.getName(), "encoded_DBConnection" );
+    assertEquals( databaseMeta.getDisplayName(), "encoded.DBConnection" );
   }
 
   /**
@@ -74,7 +115,7 @@ public class TransTest {
     String expected = meta.log.getLogChannelId();
     meta.clear();
     String actual = meta.log.getLogChannelId();
-    Assert.assertEquals( "Use same logChannel for empty constructors, or assign General level for clear() calls",
+    assertEquals( "Use same logChannel for empty constructors, or assign General level for clear() calls",
         expected, actual );
   }
 
@@ -91,7 +132,7 @@ public class TransTest {
     Mockito.when( rep.findDirectory( Mockito.anyString() ) ).thenReturn( repInt );
 
     Trans trans = new Trans( meta, rep, "junit", "junitDir", "fileName" );
-    Assert.assertEquals( "Log channel General assigned", LogChannel.GENERAL.getLogChannelId(), trans.log
+    assertEquals( "Log channel General assigned", LogChannel.GENERAL.getLogChannelId(), trans.log
         .getLogChannelId() );
   }
 
@@ -108,8 +149,8 @@ public class TransTest {
     TransFinishListenerAdder add = new TransFinishListenerAdder( trans, start );
     TransFinishListenerFirer firer = new TransFinishListenerFirer( trans, start );
     startThreads( add, firer, start );
-    Assert.assertEquals( "All listeners are added: no ConcurrentModificationException", count, add.c );
-    Assert.assertEquals( "All Finish listeners are iterated over: no ConcurrentModificationException", count, firer.c );
+    assertEquals( "All listeners are added: no ConcurrentModificationException", count, add.c );
+    assertEquals( "All Finish listeners are iterated over: no ConcurrentModificationException", count, firer.c );
   }
 
   /**
@@ -123,8 +164,8 @@ public class TransTest {
     TransFinishListenerAdder add = new TransFinishListenerAdder( trans, start );
     TransStartListenerFirer starter = new TransStartListenerFirer( trans, start );
     startThreads( add, starter, start );
-    Assert.assertEquals( "All listeners are added: no ConcurrentModificationException", count, add.c );
-    Assert.assertEquals( "All Start listeners are iterated over: no ConcurrentModificationException", count, starter.c );
+    assertEquals( "All listeners are added: no ConcurrentModificationException", count, add.c );
+    assertEquals( "All Start listeners are iterated over: no ConcurrentModificationException", count, starter.c );
   }
 
   /**
@@ -138,8 +179,8 @@ public class TransTest {
     TransStoppedCaller stopper = new TransStoppedCaller( trans, start );
     TransStopListenerAdder adder = new TransStopListenerAdder( trans, start );
     startThreads( stopper, adder, start );
-    Assert.assertEquals( "All transformation stop listeners is added", count, adder.c );
-    Assert.assertEquals( "All stop call success", count, stopper.c );
+    assertEquals( "All transformation stop listeners is added", count, adder.c );
+    assertEquals( "All stop call success", count, stopper.c );
   }
 
   @Test
@@ -152,11 +193,122 @@ public class TransTest {
     when( mockTransMeta.getParameterValue( testParam ) ).thenReturn( testParamValue );
     FileObject ktr = KettleVFS.createTempFile( "parameters", ".ktr", "ram://" );
     OutputStream outputStream = ktr.getContent().getOutputStream( true );
-    StringInputStream stringInputStream = new StringInputStream( "<transformation></transformation>" );
-    IOUtils.copy( stringInputStream, outputStream );
-    outputStream.close();
+    try {
+      InputStream inputStream = new ByteArrayInputStream( "<transformation></transformation>".getBytes() );
+      IOUtils.copy( inputStream, outputStream );
+    } finally {
+      outputStream.close();
+    }
     Trans trans = new Trans( mockTransMeta, null, null, null, ktr.getURL().toURI().toString() );
     assertEquals( testParamValue, trans.getParameterValue( testParam ) );
+  }
+
+  @Test
+  public void testTransListeners() {
+    TransMeta TransMeta = new TransMeta();
+
+    StepMeta oldFormStep = new StepMeta();
+    oldFormStep.setName( "Generate_1" );
+
+    StepMeta newFormStep = new StepMeta();
+    newFormStep.setName( "Generate_2" );
+
+    StepMeta toStep = new StepMeta();
+    toStep.setStepMetaInterface( new MetaInjectMeta() );
+    toStep.setName( "ETL Inject Metadata" );
+
+    StepMeta deletedStep = new StepMeta();
+    deletedStep.setStepMetaInterface( new MetaInjectMeta() );
+    deletedStep.setName( "ETL Inject Metadata for delete" );
+
+    // Verify add & remove listeners
+
+    TransMeta.addStep( oldFormStep );
+    TransMeta.addStep( toStep );
+    TransMeta.addStep( deletedStep );
+
+    assertEquals( TransMeta.nrStepChangeListeners(), 2 );
+    TransMeta.removeStepChangeListener( (StepMetaChangeListenerInterface) deletedStep.getStepMetaInterface() );
+    assertEquals( TransMeta.nrStepChangeListeners(), 1 );
+    TransMeta.removeStep( 2 );
+
+    TransHopMeta hi = new TransHopMeta( oldFormStep, toStep );
+    TransMeta.addTransHop( hi );
+
+    // Verify MetaInjectMeta.onStepChange()
+
+    // add new TargetStepAttribute
+    MetaInjectMeta toMeta = (MetaInjectMeta) toStep.getStepMetaInterface();
+
+    Map<TargetStepAttribute, SourceStepField> sourceMapping = new HashMap<TargetStepAttribute, SourceStepField>();
+    TargetStepAttribute keyTest = new TargetStepAttribute( "File", "key", true );
+    SourceStepField valueTest = new SourceStepField( oldFormStep.getName(), oldFormStep.getName() );
+    sourceMapping.put( keyTest, valueTest );
+
+    toMeta.setTargetSourceMapping( sourceMapping );
+
+    // Run all listeners
+    TransMeta.notifyAllListeners( oldFormStep, newFormStep );
+
+    // Verify changes, which listeners makes
+    sourceMapping = toMeta.getTargetSourceMapping();
+    for ( Entry<TargetStepAttribute, SourceStepField> entry : sourceMapping.entrySet() ) {
+      SourceStepField value = entry.getValue();
+      if ( !value.getStepname().equals( newFormStep.getName() ) ) {
+        fail();
+      }
+    }
+
+    // verify another functions
+    TransMeta.addStep( 1, deletedStep );
+    assertEquals( TransMeta.nrSteps(), 3 );
+    assertEquals( TransMeta.nrStepChangeListeners(), 2 );
+
+    TransMeta.removeStep( 0 );
+    assertEquals( TransMeta.nrSteps(), 2 );
+
+  }
+
+  @Test
+  public void testRecordsCleanUpMethodIsCalled() throws Exception {
+    Database mockedDataBase = mock( Database.class );
+    Trans trans = mock( Trans.class );
+
+    StepLogTable stepLogTable = StepLogTable.getDefault( mock( VariableSpace.class ), mock( HasDatabasesInterface.class )  );
+    stepLogTable.setConnectionName( "connection" );
+
+    TransMeta transMeta = new TransMeta(  );
+    transMeta.setStepLogTable( stepLogTable );
+
+    when( trans.getTransMeta() ).thenReturn( transMeta );
+    when( trans.createDataBase( any( DatabaseMeta.class ) ) ).thenReturn( mockedDataBase );
+    when( trans.getSteps() ).thenReturn( new ArrayList<StepMetaDataCombi>() );
+
+    doCallRealMethod().when( trans ).writeStepLogInformation();
+    trans.writeStepLogInformation();
+
+    verify( mockedDataBase ).cleanupLogRecords( stepLogTable );
+  }
+
+  @Test
+  public void testFireTransFinishedListeners() throws Exception {
+    Trans trans = new Trans();
+    TransListener mockListener = mock( TransListener.class );
+    trans.setTransListeners( Collections.singletonList( mockListener ) );
+
+    trans.fireTransFinishedListeners();
+
+    verify( mockListener ).transFinished( trans );
+  }
+
+  @Test( expected = KettleException.class )
+  public void testFireTransFinishedListenersExceprionOnTransFinished() throws Exception {
+    Trans trans = new Trans();
+    TransListener mockListener = mock( TransListener.class );
+    doThrow( KettleException.class ).when( mockListener ).transFinished( trans );
+    trans.setTransListeners( Collections.singletonList( mockListener ) );
+
+    trans.fireTransFinishedListeners();
   }
 
   private void startThreads( Runnable one, Runnable two, CountDownLatch start ) throws InterruptedException {

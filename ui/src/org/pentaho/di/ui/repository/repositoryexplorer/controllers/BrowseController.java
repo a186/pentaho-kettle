@@ -2,7 +2,7 @@
  *
  * Pentaho Data Integration
  *
- * Copyright (C) 2002-2013 by Pentaho : http://www.pentaho.com
+ * Copyright (C) 2002-2016 by Pentaho : http://www.pentaho.com
  *
  *******************************************************************************
  *
@@ -33,12 +33,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.eclipse.swt.widgets.Shell;
 import org.pentaho.di.core.exception.KettleException;
 import org.pentaho.di.i18n.BaseMessages;
 import org.pentaho.di.repository.ObjectId;
 import org.pentaho.di.repository.Repository;
 import org.pentaho.di.repository.RepositoryDirectoryInterface;
+import org.pentaho.di.ui.core.dialog.ErrorDialog;
 import org.pentaho.di.ui.repository.repositoryexplorer.ContextChangeVetoer;
 import org.pentaho.di.ui.repository.repositoryexplorer.ContextChangeVetoer.TYPE;
 import org.pentaho.di.ui.repository.repositoryexplorer.ContextChangeVetoerCollection;
@@ -65,6 +67,7 @@ import org.pentaho.ui.xul.dnd.DropEvent;
 import org.pentaho.ui.xul.impl.AbstractXulEventHandler;
 import org.pentaho.ui.xul.swt.SwtBindingFactory;
 import org.pentaho.ui.xul.swt.custom.DialogConstant;
+import org.pentaho.ui.xul.swt.tags.SwtDialog;
 import org.pentaho.ui.xul.util.XulDialogCallback;
 
 /**
@@ -103,11 +106,13 @@ public class BrowseController extends AbstractXulEventHandler implements IUISupp
 
   List<UIRepositoryObject> repositoryItems;
 
-  private MainController mainController;
+  protected MainController mainController;
 
   protected XulMessageBox messageBox;
 
   protected XulConfirmBox confirmBox;
+
+  private Shell shell;
 
   /**
    * Allows for lookup of a UIRepositoryDirectory by ObjectId. This allows the reuse of instances that are inside a UI
@@ -170,6 +175,8 @@ public class BrowseController extends AbstractXulEventHandler implements IUISupp
   }
 
   protected void createBindings() {
+    shell = ( (SwtDialog) document.getElementById( "repository-explorer-dialog" ) ).getShell();
+
     folderTree = (XulTree) document.getElementById( "folder-tree" );
     fileTable = (XulTree) document.getElementById( "file-table" );
 
@@ -319,7 +326,11 @@ public class BrowseController extends AbstractXulEventHandler implements IUISupp
         } else if ( ( mainController != null && mainController.getCallback() != null )
             && ( o instanceof UIRepositoryContent ) ) {
 
-          mainController.getCallback().open( (UIRepositoryContent) o, null );
+          try {
+            mainController.getCallback().open( (UIRepositoryContent) o, null );
+          } catch ( Exception e ) {
+            mainController.handleLostRepository( e );
+          }
           // TODO: fire request to close dialog
 
         }
@@ -337,10 +348,12 @@ public class BrowseController extends AbstractXulEventHandler implements IUISupp
       }
       selectedItemsBinding.fireSourceChanged();
     } catch ( Throwable th ) {
-      messageBox.setTitle( BaseMessages.getString( PKG, "Dialog.Error" ) );
-      messageBox.setAcceptLabel( BaseMessages.getString( PKG, "Dialog.Ok" ) );
-      messageBox.setMessage( BaseMessages.getString( PKG, th.getLocalizedMessage() ) );
-      messageBox.open();
+      if ( mainController == null || !mainController.handleLostRepository( th ) ) {
+        messageBox.setTitle( BaseMessages.getString( PKG, "Dialog.Error" ) );
+        messageBox.setAcceptLabel( BaseMessages.getString( PKG, "Dialog.Ok" ) );
+        messageBox.setMessage( BaseMessages.getString( PKG, th.getLocalizedMessage() ) );
+        messageBox.open();
+      }
     }
   }
 
@@ -357,10 +370,12 @@ public class BrowseController extends AbstractXulEventHandler implements IUISupp
           try {
             onAccept.call();
           } catch ( Exception e ) {
-            messageBox.setTitle( BaseMessages.getString( PKG, "Dialog.Error" ) );
-            messageBox.setAcceptLabel( BaseMessages.getString( PKG, "Dialog.Ok" ) );
-            messageBox.setMessage( BaseMessages.getString( PKG, e.getLocalizedMessage() ) );
-            messageBox.open();
+            if ( mainController == null || !mainController.handleLostRepository( e ) ) {
+              messageBox.setTitle( BaseMessages.getString( PKG, "Dialog.Error" ) );
+              messageBox.setAcceptLabel( BaseMessages.getString( PKG, "Dialog.Ok" ) );
+              messageBox.setMessage( BaseMessages.getString( PKG, e.getLocalizedMessage() ) );
+              messageBox.open();
+            }
           }
         }
       }
@@ -426,7 +441,11 @@ public class BrowseController extends AbstractXulEventHandler implements IUISupp
       XulPromptBox prompt = promptForName( null );
       prompt.addDialogCallback( new XulDialogCallback<String>() {
         public void onClose( XulComponent component, Status status, String value ) {
-          newName = value;
+          if ( status == Status.ACCEPT ) {
+            newName = value;
+          } else {
+            newName = null;
+          }
         }
 
         public void onError( XulComponent component, Throwable err ) {
@@ -479,10 +498,12 @@ public class BrowseController extends AbstractXulEventHandler implements IUISupp
       }
       newName = null;
     } catch ( Exception e ) {
-      messageBox.setTitle( BaseMessages.getString( PKG, "Dialog.Error" ) );
-      messageBox.setAcceptLabel( BaseMessages.getString( PKG, "Dialog.Ok" ) );
-      messageBox.setMessage( BaseMessages.getString( PKG, e.getLocalizedMessage() ) );
-      messageBox.open();
+      if ( mainController == null || !mainController.handleLostRepository( e ) ) {
+        messageBox.setTitle( BaseMessages.getString( PKG, "Dialog.Error" ) );
+        messageBox.setAcceptLabel( BaseMessages.getString( PKG, "Dialog.Ok" ) );
+        messageBox.setMessage( BaseMessages.getString( PKG, e.getLocalizedMessage() ) );
+        messageBox.open();
+      }
     }
   }
 
@@ -525,10 +546,10 @@ public class BrowseController extends AbstractXulEventHandler implements IUISupp
               try {
                 deleteFolder( repoDir );
               } catch ( Exception e ) {
-                messageBox.setTitle( BaseMessages.getString( PKG, "Dialog.Error" ) );
-                messageBox.setAcceptLabel( BaseMessages.getString( PKG, "Dialog.Ok" ) );
-                messageBox.setMessage( BaseMessages.getString( PKG, e.getLocalizedMessage() ) );
-                messageBox.open();
+                if ( mainController == null || !mainController.handleLostRepository( e ) ) {
+                  new ErrorDialog( shell, BaseMessages.getString( PKG, "RepositoryExplorerDialog.ErrorDialog.Title" ),
+                      BaseMessages.getString( PKG, "RepositoryExplorerDialog.ErrorDialog.Message" ), e );
+                }
               }
             }
           }
@@ -565,10 +586,12 @@ public class BrowseController extends AbstractXulEventHandler implements IUISupp
       directoryBinding.fireSourceChanged();
       selectedItemsBinding.fireSourceChanged();
     } catch ( Throwable th ) {
-      messageBox.setTitle( BaseMessages.getString( PKG, "Dialog.Error" ) );
-      messageBox.setAcceptLabel( BaseMessages.getString( PKG, "Dialog.Ok" ) );
-      messageBox.setMessage( BaseMessages.getString( PKG, th.getLocalizedMessage() ) );
-      messageBox.open();
+      if ( mainController == null || !mainController.handleLostRepository( th ) ) {
+        messageBox.setTitle( BaseMessages.getString( PKG, "Dialog.Error" ) );
+        messageBox.setAcceptLabel( BaseMessages.getString( PKG, "Dialog.Ok" ) );
+        messageBox.setMessage( BaseMessages.getString( PKG, th.getLocalizedMessage() ) );
+        messageBox.open();
+      }
     }
   }
 
@@ -580,8 +603,9 @@ public class BrowseController extends AbstractXulEventHandler implements IUISupp
           try {
             object.setName( value );
           } catch ( Exception e ) {
-            // convert to runtime exception so it bubbles up through the UI
-            throw new RuntimeException( e );
+            if ( mainController == null || !mainController.handleLostRepository( e ) ) {
+              throw new RuntimeException( e );
+            }
           }
         }
       }
@@ -692,12 +716,15 @@ public class BrowseController extends AbstractXulEventHandler implements IUISupp
         }
       }
     } catch ( Exception e ) {
-      result = false;
-      event.setAccepted( false );
-      messageBox.setTitle( BaseMessages.getString( PKG, "Dialog.Error" ) );
-      messageBox.setAcceptLabel( BaseMessages.getString( PKG, "Dialog.Ok" ) );
-      messageBox.setMessage( BaseMessages.getString( PKG, "BrowseController.UnableToMove", e.getLocalizedMessage() ) );
-      messageBox.open();
+      if ( mainController == null || !mainController.handleLostRepository( e ) ) {
+        result = false;
+        event.setAccepted( false );
+        messageBox.setTitle( BaseMessages.getString( PKG, "Dialog.Error" ) );
+        messageBox.setAcceptLabel( BaseMessages.getString( PKG, "Dialog.Ok" ) );
+        messageBox.setMessage(
+            BaseMessages.getString( PKG, "BrowseController.UnableToMove", e.getLocalizedMessage() ) );
+        messageBox.open();
+      }
     }
 
     event.setAccepted( result );
@@ -708,6 +735,17 @@ public class BrowseController extends AbstractXulEventHandler implements IUISupp
     for ( UIRepositoryObject o : objects ) {
       o.move( targetDirectory );
     }
+  }
+
+  private void messageBox( String message ) {
+    messageBox( "Dialog.Error", "Dialog.Ok", message );
+  }
+
+  private void messageBox( String title, String acceptLabel, String message ) {
+    messageBox.setTitle( BaseMessages.getString( PKG, title ) );
+    messageBox.setAcceptLabel( BaseMessages.getString( PKG, acceptLabel ) );
+    messageBox.setMessage( message );
+    messageBox.open();
   }
 
   public void onDoubleClick( Object[] selectedItems ) {
@@ -809,7 +847,9 @@ public class BrowseController extends AbstractXulEventHandler implements IUISupp
 
       }
     } catch ( KettleException e ) {
-      throw new RuntimeException( e );
+      if ( mainController == null || !mainController.handleLostRepository( e ) ) {
+        throw new RuntimeException( e );
+      }
     }
     fireFoldersAndItemsChange( previousVal, previousRepoObjects );
   }
@@ -821,7 +861,9 @@ public class BrowseController extends AbstractXulEventHandler implements IUISupp
         repoObjects = repositoryDirectories.get( 0 ).getRepositoryObjects();
       } catch ( KettleException e ) {
         // convert to runtime exception so it bubbles up through the UI
-        throw new RuntimeException( e );
+        if ( mainController == null || !mainController.handleLostRepository( e ) ) {
+          throw new RuntimeException( e );
+        }
       }
     }
     return repoObjects;
@@ -899,4 +941,23 @@ public class BrowseController extends AbstractXulEventHandler implements IUISupp
     return true;
   }
 
+  @VisibleForTesting
+  void setDirMap( Map<ObjectId, UIRepositoryDirectory> dirMap ) {
+    this.dirMap = dirMap;
+  }
+
+  @VisibleForTesting
+  void setFolderTree( XulTree folderTree ) {
+    this.folderTree = folderTree;
+  }
+
+  @VisibleForTesting
+  void setRepositoryDirectory( UIRepositoryDirectory repositoryDirectory ) {
+    this.repositoryDirectory = repositoryDirectory;
+  }
+
+  @VisibleForTesting
+  void setDirectoryBinding( Binding directoryBinding ) {
+    this.directoryBinding = directoryBinding;
+  }
 }

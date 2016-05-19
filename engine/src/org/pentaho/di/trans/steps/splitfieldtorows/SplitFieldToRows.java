@@ -101,8 +101,8 @@ public class SplitFieldToRows extends BaseStep implements StepInterface {
     if ( meta.includeRowNumber() && meta.resetRowNumber() ) {
       data.rownr = 1L;
     }
-
-    String[] splitStrings = data.delimiterPattern.split( originalString );
+    // use -1 for include all strings. see http://jira.pentaho.com/browse/PDI-11477
+    String[] splitStrings = data.delimiterPattern.split( originalString, -1 );
     for ( String string : splitStrings ) {
       Object[] outputRow = RowDataUtil.createResizedCopy( rowData, data.outputRowMeta.size() );
       outputRow[rowMeta.size()] = string;
@@ -153,10 +153,11 @@ public class SplitFieldToRows extends BaseStep implements StepInterface {
       data.rownr = 1L;
 
       try {
+        String delimiter = Const.nullToEmpty( meta.getDelimiter() );
         if ( meta.isDelimiterRegex() ) {
-          data.delimiterPattern = Pattern.compile( environmentSubstitute( meta.getDelimiter() ) );
+          data.delimiterPattern = Pattern.compile( environmentSubstitute( delimiter ) );
         } else {
-          data.delimiterPattern = Pattern.compile( Pattern.quote( environmentSubstitute( meta.getDelimiter() ) ) );
+          data.delimiterPattern = Pattern.compile( Pattern.quote( environmentSubstitute( delimiter ) ) );
         }
       } catch ( PatternSyntaxException pse ) {
         log.logError( pse.getMessage() );

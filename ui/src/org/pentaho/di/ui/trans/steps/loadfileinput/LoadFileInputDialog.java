@@ -997,9 +997,7 @@ public class LoadFileInputDialog extends BaseStepDialog implements StepDialogInt
     // Listen to the Browse... button
     wbbFilename.addSelectionListener( new SelectionAdapter() {
       public void widgetSelected( SelectionEvent e ) {
-        if ( !Const.isEmpty( wFilemask.getText() ) || !Const.isEmpty( wExcludeFilemask.getText() ) ) // A mask: a
-                                                                                                     // directory!
-        {
+        if ( !Const.isEmpty( wFilemask.getText() ) || !Const.isEmpty( wExcludeFilemask.getText() ) ) { // A mask: a directory!
           DirectoryDialog dialog = new DirectoryDialog( shell, SWT.OPEN );
           if ( wFilename.getText() != null ) {
             String fpath = transMeta.environmentSubstitute( wFilename.getText() );
@@ -1343,7 +1341,6 @@ public class LoadFileInputDialog extends BaseStepDialog implements StepDialogInt
     // copy info to TextFileInputMeta class (input)
     in.setRowLimit( Const.toLong( wLimit.getText(), 0L ) );
     in.setEncoding( wEncoding.getText() );
-    in.setFilenameField( wInclFilenameField.getText() );
     in.setRowNumberField( wInclRownumField.getText() );
     in.setAddResultFile( wAddResult.getSelection() );
     in.setIgnoreEmptyFile( wIgnoreEmptyFile.getSelection() );
@@ -1354,16 +1351,27 @@ public class LoadFileInputDialog extends BaseStepDialog implements StepDialogInt
     in.setIsInFields( wFilenameInField.getSelection() );
     in.setDynamicFilenameField( wFilenameField.getText() );
 
-    int nrFiles = wFilenameList.getItemCount();
     int nrFields = wFields.nrNonEmpty();
 
-    in.allocate( nrFiles, nrFields );
+    if ( wFilenameInField.getSelection() ) {
+      in.allocate( 0, nrFields );
 
-    in.setFileName( wFilenameList.getItems( 0 ) );
-    in.setFileMask( wFilenameList.getItems( 1 ) );
-    in.setExcludeFileMask( wFilenameList.getItems( 2 ) );
-    in.setFileRequired( wFilenameList.getItems( 3 ) );
-    in.setIncludeSubFolders( wFilenameList.getItems( 4 ) );
+      in.setFilenameField( wInclFilenameField.getText() );
+      in.setFileName( new String[0] );
+      in.setFileMask( new String[0] );
+      in.setExcludeFileMask( new String[0] );
+      in.setFileRequired( new String[0] );
+      in.setIncludeSubFolders( new String[0] );
+    } else {
+      in.allocate( wFilenameList.getItemCount(), nrFields );
+
+      in.setFilenameField( null );
+      in.setFileName( wFilenameList.getItems( 0 ) );
+      in.setFileMask( wFilenameList.getItems( 1 ) );
+      in.setExcludeFileMask( wFilenameList.getItems( 2 ) );
+      in.setFileRequired( wFilenameList.getItems( 3 ) );
+      in.setIncludeSubFolders( wFilenameList.getItems( 4 ) );
+    }
 
     for ( int i = 0; i < nrFields; i++ ) {
       LoadFileInputField field = new LoadFileInputField();

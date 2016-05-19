@@ -216,7 +216,7 @@ public class JobEntrySimpleEval extends JobEntryBase implements Cloneable, JobEn
   }
 
   public String getXML() {
-    StringBuffer retval = new StringBuffer( 300 );
+    StringBuilder retval = new StringBuilder( 300 );
 
     retval.append( super.getXML() );
     retval.append( "      " ).append( XMLHandler.addTagValue( "valuetype", getValueTypeCode( valuetype ) ) );
@@ -454,6 +454,9 @@ public class JobEntrySimpleEval extends JobEntryBase implements Cloneable, JobEn
           return result;
         }
         sourcevalue = resultRow.getString( indexOfField, null );
+        if ( sourcevalue == null ) {
+          sourcevalue = "";
+        }
         resultRow = null;
         rows = null;
         break;
@@ -498,6 +501,9 @@ public class JobEntrySimpleEval extends JobEntryBase implements Cloneable, JobEn
 
     boolean success = false;
     String realCompareValue = environmentSubstitute( comparevalue );
+    if ( realCompareValue == null ) {
+      realCompareValue = "";
+    }
     String realMinValue = environmentSubstitute( minvalue );
     String realMaxValue = environmentSubstitute( maxvalue );
 

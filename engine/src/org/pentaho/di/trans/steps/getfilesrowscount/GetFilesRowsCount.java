@@ -22,7 +22,7 @@
 
 package org.pentaho.di.trans.steps.getfilesrowscount;
 
-import org.apache.commons.vfs.FileType;
+import org.apache.commons.vfs2.FileType;
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.ResultFile;
 import org.pentaho.di.core.exception.KettleException;
@@ -383,8 +383,8 @@ public class GetFilesRowsCount extends BaseStep implements StepInterface {
       BaseStep.closeQuietly( data.fr );
       data.fr = null;
     }
-    if ( data.lineStringBuffer != null ) {
-      data.lineStringBuffer = null;
+    if ( data.lineStringBuilder != null ) {
+      data.lineStringBuilder = null;
     }
 
     super.dispose( smi, sdi );

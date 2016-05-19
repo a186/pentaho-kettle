@@ -26,6 +26,7 @@ import junit.framework.JUnit4TestAdapter;
 import junit.framework.Test;
 import junit.framework.TestSuite;
 
+import org.pentaho.di.core.database.ConnectionPoolUtilIntegrationTest;
 import org.pentaho.di.core.database.DatabaseTest;
 import org.pentaho.di.core.parameters.ParameterSimpleTransTest;
 import org.pentaho.di.core.row.ValueDataUtilTest;
@@ -54,7 +55,6 @@ import org.pentaho.di.trans.steps.tableoutput.TableOutputTest;
 import org.pentaho.di.trans.steps.transexecutor.TransExecutorTest;
 import org.pentaho.di.trans.steps.valuemapper.ValueMapperTest;
 import org.pentaho.di.trans.steps.webservices.WebServiceTest;
-import org.pentaho.di.ui.dialog.TipsDialogTest;
 
 /**
  * Regression tests for the PDI framework.
@@ -73,10 +73,11 @@ public class AllRegressionTests {
     // So adding testcases in the right order is important.
     //
 
-    suite.addTestSuite( StringEvaluatorTest.class );
+    suite.addTest( new JUnit4TestAdapter( StringEvaluatorTest.class ) );
     suite.addTestSuite( ParameterSimpleTransTest.class );
     suite.addTestSuite( ValueDataUtilTest.class );
     suite.addTest( new JUnit4TestAdapter( DatabaseTest.class ) );
+    suite.addTest( new JUnit4TestAdapter( ConnectionPoolUtilIntegrationTest.class ) );
     suite.addTestSuite( HopTest.class );
     suite.addTestSuite( InjectorTest.class );
     suite.addTestSuite( RowGeneratorTest.class );
@@ -101,7 +102,6 @@ public class AllRegressionTests {
     suite.addTestSuite( CsvInput2Test.class );
     suite.addTestSuite( WebServiceTest.class );
     suite.addTest( new JUnit4TestAdapter( GPLoadTest.class ) );
-    suite.addTest( new JUnit4TestAdapter( TipsDialogTest.class ) );
     suite.addTest( new JUnit4TestAdapter( TransExecutorTest.class ) );
 
     // Temporarily disable this test, it never worked on Windows or Unix so

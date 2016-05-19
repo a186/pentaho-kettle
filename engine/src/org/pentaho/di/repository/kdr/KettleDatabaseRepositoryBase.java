@@ -420,9 +420,9 @@ public abstract class KettleDatabaseRepositoryBase extends AbstractRepository {
     TABLE_R_REPOSITORY_LOG, TABLE_R_SLAVE, TABLE_R_STEP, TABLE_R_STEP_ATTRIBUTE, TABLE_R_STEP_DATABASE,
     TABLE_R_STEP_TYPE, TABLE_R_TRANSFORMATION,
     TABLE_R_TRANS_ATTRIBUTE,
-    TABLE_R_TRANS_CLUSTER
+    TABLE_R_TRANS_CLUSTER,
     // , TABLE_R_TRANS_DATA_SERVICE
-    , TABLE_R_TRANS_HOP, TABLE_R_TRANS_LOCK, TABLE_R_TRANS_NOTE, TABLE_R_TRANS_PARTITION_SCHEMA,
+    TABLE_R_TRANS_HOP, TABLE_R_TRANS_LOCK, TABLE_R_TRANS_NOTE, TABLE_R_TRANS_PARTITION_SCHEMA,
     TABLE_R_TRANS_SLAVE, TABLE_R_TRANS_STEP_CONDITION, TABLE_R_USER, TABLE_R_VALUE, TABLE_R_VERSION,
     TABLE_R_NAMESPACE, TABLE_R_ELEMENT_TYPE, TABLE_R_ELEMENT, TABLE_R_ELEMENT_ATTRIBUTE };
 
@@ -457,6 +457,18 @@ public abstract class KettleDatabaseRepositoryBase extends AbstractRepository {
   public static final String JOB_ATTRIBUTE_PARAM_DEFAULT = "PARAM_DEFAULT";
   public static final String JOB_ATTRIBUTE_PARAM_DESCRIPTION = "PARAM_DESC";
   public static final String JOB_ATTRIBUTE_LOG_SIZE_LIMIT = "LOG_SIZE_LIMIT";
+
+  //IDX_JOB_ATTRIBUTE_LOOKUP PDI-10237
+  public static final String IDX_JOB_ATTRIBUTE_LOOKUP = "IDX_JATT";
+  public static final String IDX_TRANS_ATTRIBUTE_LOOKUP = "IDX_TATT";
+  public static final String IDX_R_DATABASE_ATTRIBUTE = "IDX_RDAT";
+  public static final String IDX_R_DIRECTORY = "IDX_RDIR";
+  public static final String IDX_R_STEP_ATTRIBUTE = "IDX_RSAT";
+  public static final String R_STEP_DATABASE_LU1 = "IDX_RSD1";
+  public static final String R_STEP_DATABASE_LU2 = "IDX_RSD2";
+  public static final String R_JOBENTRY_DATABASE_LU1 = "IDX_RJD1";
+  public static final String R_JOBENTRY_DATABASE_LU2 = "IDX_RJD2";
+  public static final String R_JOBENTRY_ATTRIBUTE = "IDX_RJEA";
 
   protected KettleDatabaseRepositoryMeta repositoryMeta;
 

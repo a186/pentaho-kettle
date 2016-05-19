@@ -42,7 +42,7 @@ import org.pentaho.di.trans.steps.mapping.MappingValueRename;
 
 /**
  * Do nothing. Pass all input data to the next steps.
- * 
+ *
  * @author Matt
  * @since 2-jun-2003
  */
@@ -132,6 +132,10 @@ public class MappingInput extends BaseStep implements StepInterface {
         }
         valueMeta.setName( valueRename.getTargetValueName() );
       }
+
+      // This is typical side effect of ESR-4178
+      data.outputRowMeta.setValueMetaList( data.outputRowMeta.getValueMetaList() );
+      this.getInputRowMeta().setValueMetaList( this.getInputRowMeta().getValueMetaList() );
 
       // The input row meta has been manipulated correctly for the call to meta.getFields(), so create a blank
       // outputRowMeta

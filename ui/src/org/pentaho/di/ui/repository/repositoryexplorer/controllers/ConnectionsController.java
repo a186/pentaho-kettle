@@ -47,6 +47,7 @@ import org.pentaho.di.ui.repository.repositoryexplorer.model.UIDatabaseConnectio
 import org.pentaho.di.ui.repository.repositoryexplorer.model.UIDatabaseConnections;
 import org.pentaho.di.ui.repository.repositoryexplorer.model.UIObjectCreationException;
 import org.pentaho.di.ui.repository.repositoryexplorer.model.UIObjectRegistry;
+import org.pentaho.ui.xul.XulException;
 import org.pentaho.ui.xul.binding.Binding;
 import org.pentaho.ui.xul.binding.BindingFactory;
 import org.pentaho.ui.xul.binding.DefaultBindingFactory;
@@ -76,6 +77,8 @@ public class ConnectionsController extends LazilyInitializedController implement
 
   private DatabaseDialog databaseDialog;
 
+  private MainController mainController;
+
   protected ContextChangeVetoerCollection contextChangeVetoers;
 
   protected List<UIDatabaseConnection> selectedConnections;
@@ -93,7 +96,8 @@ public class ConnectionsController extends LazilyInitializedController implement
     this.repository = repository;
   }
 
-  private DatabaseDialog getDatabaseDialog() {
+  // package-local visibility for testing purposes
+  DatabaseDialog getDatabaseDialog() {
     if ( databaseDialog != null ) {
       return databaseDialog;
     }
@@ -119,25 +123,42 @@ public class ConnectionsController extends LazilyInitializedController implement
         bf.createBinding( connectionsTable, "selectedItems", this, "selectedConnections" );
       }
     } catch ( Exception ex ) {
-      // convert to runtime exception so it bubbles up through the UI
-      throw new RuntimeException( ex );
+      if ( mainController == null || !mainController.handleLostRepository( ex ) ) {
+        // convert to runtime exception so it bubbles up through the UI
+        throw new RuntimeException( ex );
+      }
     }
   }
 
   @Override
   protected boolean doLazyInit() {
-    setRepReadOnly( this.repository.getRepositoryMeta().getRepositoryCapabilities().isReadOnly() );
-
-    // Load the SWT Shell from the explorer dialog
-    shell = ( (SwtDialog) document.getElementById( "repository-explorer-dialog" ) ).getShell();
-    bf = new DefaultBindingFactory();
-    bf.setDocument( this.getXulDomContainer().getDocumentRoot() );
-
-    if ( bf != null ) {
-      createBindings();
+    try {
+      mainController = (MainController) this.getXulDomContainer().getEventHandler( "mainController" );
+    } catch ( XulException e ) {
+      return false;
     }
-    enableButtons( true, false, false );
-    return true;
+
+    try {
+      setRepReadOnly( this.repository.getRepositoryMeta().getRepositoryCapabilities().isReadOnly() );
+
+      // Load the SWT Shell from the explorer dialog
+      shell = ( (SwtDialog) document.getElementById( "repository-explorer-dialog" ) ).getShell();
+      bf = new DefaultBindingFactory();
+      bf.setDocument( this.getXulDomContainer().getDocumentRoot() );
+
+      if ( bf != null ) {
+        createBindings();
+      }
+      enableButtons( true, false, false );
+
+      return true;
+    } catch ( Exception e ) {
+      if ( mainController == null || !mainController.handleLostRepository( e ) ) {
+        return false;
+      }
+    }
+
+    return false;
   }
 
   public Repository getRepository() {
@@ -156,8 +177,10 @@ public class ConnectionsController extends LazilyInitializedController implement
         }
       }
     } catch ( Exception e ) {
-      // convert to runtime exception so it bubbles up through the UI
-      throw new RuntimeException( e );
+      if ( mainController == null || !mainController.handleLostRepository( e ) ) {
+        // convert to runtime exception so it bubbles up through the UI
+        throw new RuntimeException( e );
+      }
     }
   }
 
@@ -165,7 +188,8 @@ public class ConnectionsController extends LazilyInitializedController implement
     return isRepReadOnly;
   }
 
-  private void refreshConnectionList() {
+  // package-local visibility for testing purposes
+  void refreshConnectionList() {
     final List<UIDatabaseConnection> tmpList = new ArrayList<UIDatabaseConnection>();
     Runnable r = new Runnable() {
       public void run() {
@@ -180,8 +204,10 @@ public class ConnectionsController extends LazilyInitializedController implement
             }
           }
         } catch ( KettleException e ) {
-          // convert to runtime exception so it bubbles up through the UI
-          throw new RuntimeException( e );
+          if ( mainController == null || !mainController.handleLostRepository( e ) ) {
+            // convert to runtime exception so it bubbles up through the UI
+            throw new RuntimeException( e );
+          }
         }
       }
     };
@@ -196,21 +222,19 @@ public class ConnectionsController extends LazilyInitializedController implement
       getDatabaseDialog().setDatabaseMeta( databaseMeta );
 
       String dbName = getDatabaseDialog().open();
-      if ( dbName != null && !dbName.equals( "" ) ) {
-        // See if this user connection exists...
-        ObjectId idDatabase = repository.getDatabaseID( dbName );
-        if ( idDatabase == null ) {
-          repository.insertLogEntry( BaseMessages.getString(
-            PKG, "ConnectionsController.Message.CreatingDatabase", getDatabaseDialog()
-              .getDatabaseMeta().getName() ) );
-          repository.save( getDatabaseDialog().getDatabaseMeta(), Const.VERSION_COMMENT_INITIAL_VERSION, null );
-        } else {
-          MessageBox mb = new MessageBox( shell, SWT.ICON_ERROR | SWT.OK );
-          mb.setMessage( BaseMessages.getString(
-            PKG, "RepositoryExplorerDialog.Connection.Create.AlreadyExists.Message" ) );
-          mb.setText( BaseMessages.getString(
-            PKG, "RepositoryExplorerDialog.Connection.Create.AlreadyExists.Title" ) );
-          mb.open();
+      if ( dbName != null ) {
+        dbName = dbName.trim();
+        if ( !dbName.isEmpty() ) {
+          // See if this user connection exists...
+          ObjectId idDatabase = repository.getDatabaseID( dbName );
+          if ( idDatabase == null ) {
+            repository.insertLogEntry( BaseMessages.getString(
+              PKG, "ConnectionsController.Message.CreatingDatabase", getDatabaseDialog()
+                .getDatabaseMeta().getName() ) );
+            repository.save( getDatabaseDialog().getDatabaseMeta(), Const.VERSION_COMMENT_INITIAL_VERSION, null );
+          } else {
+            showAlreadyExistsMessage();
+          }
         }
       }
       // We should be able to tell the difference between a cancel and an empty database name
@@ -222,12 +246,24 @@ public class ConnectionsController extends LazilyInitializedController implement
       // mb.open();
       // }
     } catch ( KettleException e ) {
-      new ErrorDialog( shell,
-        BaseMessages.getString( PKG, "RepositoryExplorerDialog.Connection.Create.UnexpectedError.Title" ),
-        BaseMessages.getString( PKG, "RepositoryExplorerDialog.Connection.Create.UnexpectedError.Message" ), e );
+      if ( mainController == null || !mainController.handleLostRepository( e ) ) {
+        new ErrorDialog( shell,
+          BaseMessages.getString( PKG, "RepositoryExplorerDialog.Connection.Create.UnexpectedError.Title" ),
+          BaseMessages.getString( PKG, "RepositoryExplorerDialog.Connection.Create.UnexpectedError.Message" ), e );
+      }
     } finally {
       refreshConnectionList();
     }
+  }
+
+  // package-local visibility for testing purposes
+  void showAlreadyExistsMessage() {
+    MessageBox mb = new MessageBox( shell, SWT.ICON_ERROR | SWT.OK );
+    mb.setMessage( BaseMessages.getString(
+      PKG, "RepositoryExplorerDialog.Connection.Create.AlreadyExists.Message" ) );
+    mb.setText( BaseMessages.getString(
+      PKG, "RepositoryExplorerDialog.Connection.Create.AlreadyExists.Title" ) );
+    mb.open();
   }
 
   /**
@@ -298,17 +334,26 @@ public class ConnectionsController extends LazilyInitializedController implement
           MessageBox mb = new MessageBox( shell, SWT.ICON_ERROR | SWT.OK );
           mb.setMessage( BaseMessages.getString(
             PKG, "RepositoryExplorerDialog.Connection.Edit.DoesNotExists.Message" ) );
-          mb
-            .setText( BaseMessages.getString(
-              PKG, "RepositoryExplorerDialog.Connection.Edit.DoesNotExists.Title" ) );
+          mb.setText( BaseMessages.getString(
+            PKG, "RepositoryExplorerDialog.Connection.Edit.DoesNotExists.Title" ) );
           mb.open();
         } else {
           getDatabaseDialog().setDatabaseMeta( databaseMeta );
           String dbName = getDatabaseDialog().open();
-          if ( dbName != null && !dbName.equals( "" ) ) {
-            repository.insertLogEntry( BaseMessages.getString(
-              PKG, "ConnectionsController.Message.UpdatingDatabase", databaseMeta.getName() ) );
-            repository.save( databaseMeta, Const.VERSION_COMMENT_EDIT_VERSION, null );
+          if ( dbName != null ) {
+            dbName = dbName.trim();
+            if ( !dbName.isEmpty() ) {
+              ObjectId idRenamed = repository.getDatabaseID( dbName );
+              if ( idRenamed == null || idRenamed.equals( idDatabase ) ) {
+                // renaming to non-existing name or updating the current
+                repository.insertLogEntry( BaseMessages.getString(
+                  PKG, "ConnectionsController.Message.UpdatingDatabase", databaseMeta.getName() ) );
+                repository.save( databaseMeta, Const.VERSION_COMMENT_EDIT_VERSION, null );
+              } else {
+                // trying to rename to an existing name - show error dialog
+                showAlreadyExistsMessage();
+              }
+            }
           }
           // We should be able to tell the difference between a cancel and an empty database name
           //
@@ -329,9 +374,11 @@ public class ConnectionsController extends LazilyInitializedController implement
         mb.open();
       }
     } catch ( KettleException e ) {
-      new ErrorDialog( shell,
-        BaseMessages.getString( PKG, "RepositoryExplorerDialog.Connection.Create.UnexpectedError.Title" ),
-        BaseMessages.getString( PKG, "RepositoryExplorerDialog.Connection.Edit.UnexpectedError.Message" ), e );
+      if ( mainController == null || !mainController.handleLostRepository( e ) ) {
+        new ErrorDialog( shell,
+          BaseMessages.getString( PKG, "RepositoryExplorerDialog.Connection.Create.UnexpectedError.Title" ),
+          BaseMessages.getString( PKG, "RepositoryExplorerDialog.Connection.Edit.UnexpectedError.Message" ), e );
+      }
     } finally {
       refreshConnectionList();
     }
@@ -371,9 +418,11 @@ public class ConnectionsController extends LazilyInitializedController implement
         mb.open();
       }
     } catch ( KettleException e ) {
-      new ErrorDialog( shell,
-        BaseMessages.getString( PKG, "RepositoryExplorerDialog.Connection.Create.UnexpectedError.Title" ),
-        BaseMessages.getString( PKG, "RepositoryExplorerDialog.Connection.Remove.UnexpectedError.Message" ), e );
+      if ( mainController == null || !mainController.handleLostRepository( e ) ) {
+        new ErrorDialog( shell,
+          BaseMessages.getString( PKG, "RepositoryExplorerDialog.Connection.Create.UnexpectedError.Title" ),
+          BaseMessages.getString( PKG, "RepositoryExplorerDialog.Connection.Remove.UnexpectedError.Message" ), e );
+      }
     } finally {
       refreshConnectionList();
     }

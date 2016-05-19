@@ -19,9 +19,8 @@ package org.pentaho.di.openerp.core;
 
 /**
  * Simple class to hold the filter information for the OpenERPObjectInput step
- * 
+ *
  * @author Pieter van der Merwe
- * 
  */
 public class ReadFilter {
   private String operator = "";
@@ -34,8 +33,9 @@ public class ReadFilter {
   }
 
   public void setOperator( String operator ) {
-    if ( operator == null )
+    if ( operator == null ) {
       operator = "";
+    }
 
     this.operator = operator;
   }
@@ -45,8 +45,9 @@ public class ReadFilter {
   }
 
   public void setFieldName( String fieldName ) {
-    if ( fieldName == null )
+    if ( fieldName == null ) {
       fieldName = "";
+    }
 
     this.fieldName = fieldName;
   }
@@ -56,8 +57,9 @@ public class ReadFilter {
   }
 
   public void setComparator( String comparator ) {
-    if ( comparator == null )
+    if ( comparator == null ) {
       comparator = "";
+    }
 
     this.comparator = comparator;
   }
@@ -67,8 +69,9 @@ public class ReadFilter {
   }
 
   public void setValue( String value ) {
-    if ( value == null )
+    if ( value == null ) {
       value = "";
+    }
 
     this.value = value;
   }

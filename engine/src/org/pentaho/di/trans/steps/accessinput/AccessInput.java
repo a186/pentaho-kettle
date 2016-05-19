@@ -26,7 +26,7 @@ import java.io.File;
 import java.util.Date;
 import java.util.List;
 
-import org.apache.commons.vfs.FileObject;
+import org.apache.commons.vfs2.FileObject;
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.ResultFile;
 import org.pentaho.di.core.exception.KettleException;
@@ -84,8 +84,7 @@ public class AccessInput extends BaseStep implements StepInterface {
 
       putRow( data.outputRowMeta, outputRowData ); // copy row to output rowset(s);
 
-      if ( meta.getRowLimit() > 0 && data.rownr > meta.getRowLimit() ) // limit has been reached: stop now.
-      {
+      if ( meta.getRowLimit() > 0 && data.rownr > meta.getRowLimit() ) { // limit has been reached: stop now.
         setOutputDone();
         return false;
       }

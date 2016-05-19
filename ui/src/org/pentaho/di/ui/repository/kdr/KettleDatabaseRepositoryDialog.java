@@ -346,10 +346,10 @@ public class KettleDatabaseRepositoryDialog implements RepositoryDialogInterface
    */
   public void getData() {
     if ( input.getName() != null ) {
-      wId.setText( input.getName() );
+      wName.setText( input.getName() );
     }
     if ( input.getDescription() != null ) {
-      wName.setText( input.getDescription() );
+      wId.setText( input.getDescription() );
     }
     if ( input.getConnection() != null ) {
       wConnection.setText( input.getConnection().getName() );
@@ -362,8 +362,8 @@ public class KettleDatabaseRepositoryDialog implements RepositoryDialogInterface
   }
 
   private void getInfo( KettleDatabaseRepositoryMeta info ) {
-    info.setName( wId.getText() );
-    info.setDescription( wName.getText() );
+    info.setName( wName.getText() );
+    info.setDescription( wId.getText() );
 
     int idx = wConnection.getSelectionIndex();
     if ( idx >= 0 ) {
@@ -532,7 +532,7 @@ public class KettleDatabaseRepositoryDialog implements RepositoryDialogInterface
             UpgradeRepositoryProgressDialog urpd = new UpgradeRepositoryProgressDialog( shell, rep, upgrade );
             if ( urpd.open() ) {
               if ( urpd.isDryRun() ) {
-                StringBuffer sql = new StringBuffer();
+                StringBuilder sql = new StringBuilder();
                 sql.append( "-- Repository creation/upgrade DDL: " ).append( Const.CR );
                 sql.append( "--" ).append( Const.CR );
                 sql.append( "-- Nothing was created nor modified in the target repository database." )

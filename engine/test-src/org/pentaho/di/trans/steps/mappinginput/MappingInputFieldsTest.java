@@ -28,12 +28,12 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 
-import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.pentaho.di.core.BlockingRowSet;
+import org.pentaho.di.core.KettleEnvironment;
 import org.pentaho.di.core.logging.LoggingObjectInterface;
 import org.pentaho.di.core.logging.LoggingObjectType;
 import org.pentaho.di.core.logging.SimpleLoggingObject;
@@ -51,24 +51,29 @@ import org.pentaho.di.trans.steps.mapping.MappingValueRename;
 
 public class MappingInputFieldsTest {
 
+  private static Plugin p1;
+  private static Plugin p2;
+
   MappingInput step;
   MappingInputMeta meta;
 
   @BeforeClass
   public static void setUpBeforeClass() throws Exception {
+    KettleEnvironment.init();
+
     // PluginRegistry.addPluginType(ValueMetaPluginType.getInstance());
     PluginRegistry.getInstance().registerPluginType( ValueMetaPluginType.class );
 
     Map<Class<?>, String> classes = new HashMap<Class<?>, String>();
     classes.put( ValueMetaInterface.class, "org.pentaho.di.core.row.value.ValueMetaString" );
-    Plugin p1 =
-      new Plugin( new String[] { "2" }, ValueMetaPluginType.class, ValueMetaInterface.class, "", "", "", "", false,
+    p1 =
+        new Plugin( new String[] { "2" }, ValueMetaPluginType.class, ValueMetaInterface.class, "", "", "", "", false,
         true, classes, null, null, null );
 
     classes = new HashMap<Class<?>, String>();
     classes.put( ValueMetaInterface.class, "org.pentaho.di.core.row.value.ValueMetaInteger" );
-    Plugin p2 =
-      new Plugin( new String[] { "5" }, ValueMetaPluginType.class, ValueMetaInterface.class, "", "", "", "", false,
+    p2 =
+        new Plugin( new String[] { "5" }, ValueMetaPluginType.class, ValueMetaInterface.class, "", "", "", "", false,
         true, classes, null, null, null );
 
     PluginRegistry.getInstance().registerPlugin( ValueMetaPluginType.class, p1 );
@@ -77,6 +82,12 @@ public class MappingInputFieldsTest {
 
   @AfterClass
   public static void tearDownAfterClass() throws Exception {
+    if ( p1 != null ) {
+      PluginRegistry.getInstance().removePlugin( ValueMetaPluginType.class, p1 );
+    }
+    if ( p2 != null ) {
+      PluginRegistry.getInstance().removePlugin( ValueMetaPluginType.class, p2 );
+    }
   }
 
   @Before
@@ -97,13 +108,12 @@ public class MappingInputFieldsTest {
     step.getTrans().setRunning( true );
   }
 
-  @After
-  public void tearDown() throws Exception {
-  }
-
-  /*
-   * verifies: If SelectingAndSortingUnspecifiedFields checkbox is checked, then 1)all fields throw to the next step;
-   * 2)fields are resorted: mapped fields, then alphabetical sorted not mapped fields.
+  /**
+   * verifies: If SelectingAndSortingUnspecifiedFields checkbox is checked, then 
+   * <ol>
+   * <li>all fields throw to the next step;
+   * <li>fields are resorted: mapped fields, then alphabetical sorted not mapped fields.
+   * </ol>
    */
   @Test
   public void testSelectingAndSortingUnspecifiedFields() throws Exception {

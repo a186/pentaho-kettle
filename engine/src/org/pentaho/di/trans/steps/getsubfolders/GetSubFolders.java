@@ -26,7 +26,7 @@ import java.io.IOException;
 import java.util.Date;
 import java.util.List;
 
-import org.apache.commons.vfs.FileObject;
+import org.apache.commons.vfs2.FileObject;
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.exception.KettleException;
 import org.pentaho.di.core.exception.KettleStepException;
@@ -206,8 +206,7 @@ public class GetSubFolders extends BaseStep implements StepInterface {
         // Send row
         putRow( data.outputRowMeta, outputRow );
 
-        if ( meta.getRowLimit() > 0 && data.rownr >= meta.getRowLimit() ) // limit has been reached: stop now.
-        {
+        if ( meta.getRowLimit() > 0 && data.rownr >= meta.getRowLimit() ) { // limit has been reached: stop now.
           setOutputDone();
           return false;
         }

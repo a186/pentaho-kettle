@@ -22,8 +22,6 @@
 
 package org.pentaho.di.ui.core.dialog;
 
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -51,6 +49,7 @@ import org.eclipse.swt.widgets.TableItem;
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.KettleVariablesList;
 import org.pentaho.di.core.logging.LogChannel;
+import org.pentaho.di.core.util.EnvUtil;
 import org.pentaho.di.core.variables.Variables;
 import org.pentaho.di.i18n.BaseMessages;
 import org.pentaho.di.ui.core.PropsUI;
@@ -213,10 +212,7 @@ public class KettlePropertiesFileDialog extends Dialog {
     try {
       // Load the Kettle properties file...
       //
-      String filename = getKettlePropertiesFilename();
-      File file = new File( filename );
-      Properties properties = new Properties();
-      properties.load( new FileInputStream( file ) );
+      Properties properties = EnvUtil.readProperties( getKettlePropertiesFilename() );
 
       // These are the standard Kettle variables...
       //

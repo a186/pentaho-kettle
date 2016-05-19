@@ -59,6 +59,7 @@ import org.pentaho.di.trans.step.StepErrorMeta;
 import org.pentaho.di.trans.step.StepMeta;
 import org.pentaho.di.trans.step.StepMetaInterface;
 import org.pentaho.di.trans.step.StepPartitioningMeta;
+import org.pentaho.di.trans.steps.missing.MissingTrans;
 
 public class KettleDatabaseRepositoryTransDelegate extends KettleDatabaseRepositoryBaseDelegate {
 
@@ -537,6 +538,9 @@ public class KettleDatabaseRepositoryTransDelegate extends KettleDatabaseReposit
             StepMeta stepMeta =
               repository.stepDelegate.loadStepMeta( stepids[i], transMeta.getDatabases(), transMeta
                 .getPartitionSchemas() );
+            if ( stepMeta.isMissing() ) {
+              transMeta.addMissingTrans( (MissingTrans) stepMeta.getStepMetaInterface() );
+            }
             // In this case, we just add or replace the shared steps.
             // The repository is considered "more central"
             transMeta.addOrReplaceStep( stepMeta );
@@ -955,8 +959,7 @@ public class KettleDatabaseRepositoryTransDelegate extends KettleDatabaseReposit
 
         DatabaseMeta check = transMeta.findDatabase( databaseMeta.getName() ); // Check if there already is one in the
                                                                                // transformation
-        if ( check == null || overWriteShared ) // We only add, never overwrite database connections.
-        {
+        if ( check == null || overWriteShared ) { // We only add, never overwrite database connections.
           if ( databaseMeta.getName() != null ) {
             transMeta.addOrReplaceDatabase( databaseMeta );
             if ( !overWriteShared ) {

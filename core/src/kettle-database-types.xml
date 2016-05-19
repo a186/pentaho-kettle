@@ -1,10 +1,5 @@
 <database-types>
 
-   <database-type id="KettleThin">                                                        
-    <description>Kettle thin JDBC driver</description>                                                
-    <classname>org.pentaho.di.core.database.KettleDatabaseMeta</classname>            
-  </database-type>                                                                   
- 
    <database-type id="AS/400">                                                        
     <description>AS/400</description>                                                
     <classname>org.pentaho.di.core.database.AS400DatabaseMeta</classname>            
@@ -163,7 +158,12 @@
   <database-type id="POSTGRESQL">
     <description>PostgreSQL</description>
     <classname>org.pentaho.di.core.database.PostgreSQLDatabaseMeta</classname>
-  </database-type>                                                            
+  </database-type>
+
+  <database-type id="REDSHIFT">
+    <description>Redshift</description>
+    <classname>org.pentaho.di.core.database.RedshiftDatabaseMeta</classname>
+  </database-type>
 
   <database-type id="REMEDY-AR-SYSTEM">
     <description>Remedy Action Request System</description>
@@ -173,11 +173,6 @@
   <database-type id="SAPDB">
     <description>MaxDB (SAP DB)</description>
     <classname>org.pentaho.di.core.database.SAPDBDatabaseMeta</classname>
-  </database-type>                                                       
-
-  <database-type id="SAPR3">
-    <description>SAP ERP System</description>
-    <classname>org.pentaho.di.core.database.SAPR3DatabaseMeta</classname>
   </database-type>                                                       
 
   <database-type id="SQLITE">

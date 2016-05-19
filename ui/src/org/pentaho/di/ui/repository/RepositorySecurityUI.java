@@ -27,6 +27,7 @@ import org.eclipse.swt.widgets.MessageBox;
 import org.eclipse.swt.widgets.Shell;
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.exception.KettleException;
+import org.pentaho.di.repository.KettleRepositoryLostException;
 import org.pentaho.di.repository.Repository;
 import org.pentaho.di.repository.RepositoryOperation;
 import org.pentaho.di.repository.RepositorySecurityProvider;
@@ -68,6 +69,10 @@ public class RepositorySecurityUI {
       }
       repository.getSecurityProvider().validateAction( operations );
     } catch ( KettleException e ) {
+      KettleRepositoryLostException krle = KettleRepositoryLostException.lookupStackStrace( e );
+      if ( krle != null ) {
+        throw krle;
+      }
       if ( displayError == true ) {
         new ErrorDialog( shell, "Security error",
             "There was a security error performing operations:" + Const.CR + operationsDesc, e );
@@ -92,13 +97,16 @@ public class RepositorySecurityUI {
     return verifyOperations( shell, repository, true, operations );
   }
 
-  public static String getVersionComment( Shell shell, Repository repository, String operationDescription ) {
+  public static String getVersionComment( Shell shell, Repository repository, String operationDescription,
+      String fullPath, boolean forceEntry ) {
+    //forceEntry is used to force the comment prompt when multiple files will be affected.  It 
+    //removes a web service call per file.
     if ( repository == null ) {
       return null;
     }
 
     RepositorySecurityProvider provider = repository.getSecurityProvider();
-    if ( provider.allowsVersionComments() ) {
+    if ( forceEntry || provider.allowsVersionComments( fullPath ) ) {
 
       String explanation = "Enter a comment ";
       if ( provider.isVersionCommentMandatory() ) {
@@ -106,7 +114,7 @@ public class RepositorySecurityUI {
       } else {
         explanation += ": ";
       }
-      String versionComment = Const.VERSION_COMMENT_EDIT_VERSION + " of [" + operationDescription + "]";
+      String versionComment = "Checked in";
 
       EnterStringDialog dialog = new EnterStringDialog( shell, versionComment, "Enter comment", explanation );
       dialog.setManditory( provider.isVersionCommentMandatory() );

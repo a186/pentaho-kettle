@@ -1,8 +1,31 @@
+/*! ******************************************************************************
+ *
+ * Pentaho Data Integration
+ *
+ * Copyright (C) 2002-2016 by Pentaho : http://www.pentaho.com
+ *
+ *******************************************************************************
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ******************************************************************************/
+
 package org.pentaho.di.trans.steps.databaselookup;
 
 import static org.junit.Assert.*;
 
 import org.junit.Test;
+import org.mockito.Mockito;
 import org.pentaho.di.core.exception.KettleStepException;
 import org.pentaho.di.core.row.RowMeta;
 import org.pentaho.di.core.row.RowMetaInterface;
@@ -35,12 +58,58 @@ public class DatabaseLookupMetaTest {
 
     databaseLookupMeta.getFields( row, "", info, null, null, null, null );
 
-    List<ValueMetaInterface> expectedRow =
-      Arrays.asList( new ValueMetaInterface[] {
-        new ValueMetaString( "value" ), new ValueMetaString( "v1" ), new ValueMetaString( "v2" ), } );
+    List<ValueMetaInterface> expectedRow = Arrays.asList( new ValueMetaInterface[] { new ValueMetaString( "value" ),
+      new ValueMetaString( "v1" ), new ValueMetaString( "v2" ), } );
     assertEquals( 3, row.getValueMetaList().size() );
     for ( int i = 0; i < 3; i++ ) {
       assertEquals( expectedRow.get( i ).getName(), row.getValueMetaList().get( i ).getName() );
     }
+  }
+
+  @Test
+  public void testProvidesModelerMeta() throws Exception {
+
+    DatabaseLookupMeta databaseLookupMeta = new DatabaseLookupMeta();
+    databaseLookupMeta.setReturnValueField( new String[] { "f1", "f2", "f3" } );
+    databaseLookupMeta.setReturnValueNewName( new String[] { "s4", "s5", "s6" } );
+
+    DatabaseLookupData databaseLookupData = new DatabaseLookupData();
+    databaseLookupData.returnMeta = Mockito.mock( RowMeta.class );
+    assertEquals( databaseLookupData.returnMeta, databaseLookupMeta.getRowMeta( databaseLookupData ) );
+    assertEquals( 3, databaseLookupMeta.getDatabaseFields().size() );
+    assertEquals( "f1", databaseLookupMeta.getDatabaseFields().get( 0 ) );
+    assertEquals( "f2", databaseLookupMeta.getDatabaseFields().get( 1 ) );
+    assertEquals( "f3", databaseLookupMeta.getDatabaseFields().get( 2 ) );
+    assertEquals( 3, databaseLookupMeta.getStreamFields().size() );
+    assertEquals( "s4", databaseLookupMeta.getStreamFields().get( 0 ) );
+    assertEquals( "s5", databaseLookupMeta.getStreamFields().get( 1 ) );
+    assertEquals( "s6", databaseLookupMeta.getStreamFields().get( 2 ) );
+  }
+
+  @Test
+  public void cloneTest() throws Exception {
+    DatabaseLookupMeta meta = new DatabaseLookupMeta();
+    meta.allocate( 2, 2 );
+    meta.setStreamKeyField1( new String[] { "aa", "bb" } );
+    meta.setTableKeyField( new String[] { "cc", "dd" } );
+    meta.setKeyCondition( new String[] { "ee", "ff" } );
+    meta.setStreamKeyField2( new String[] { "gg", "hh" } );
+    meta.setReturnValueField( new String[] { "ii", "jj" } );
+    meta.setReturnValueNewName( new String[] { "kk", "ll" } );
+    meta.setReturnValueDefault( new String[] { "mm", "nn" } );
+    meta.setReturnValueDefaultType( new int[] { 10, 50 } );
+    meta.setOrderByClause( "FOO DESC" );
+    DatabaseLookupMeta aClone = (DatabaseLookupMeta) meta.clone();
+    assertFalse( aClone == meta );
+    assertTrue( Arrays.equals( meta.getStreamKeyField1(), aClone.getStreamKeyField1() ) );
+    assertTrue( Arrays.equals( meta.getTableKeyField(), aClone.getTableKeyField() ) );
+    assertTrue( Arrays.equals( meta.getKeyCondition(), aClone.getKeyCondition() ) );
+    assertTrue( Arrays.equals( meta.getStreamKeyField2(), aClone.getStreamKeyField2() ) );
+    assertTrue( Arrays.equals( meta.getReturnValueField(), aClone.getReturnValueField() ) );
+    assertTrue( Arrays.equals( meta.getReturnValueNewName(), aClone.getReturnValueNewName() ) );
+    assertTrue( Arrays.equals( meta.getReturnValueDefault(), aClone.getReturnValueDefault() ) );
+    assertTrue( Arrays.equals( meta.getReturnValueDefaultType(), aClone.getReturnValueDefaultType() ) );
+    assertEquals( meta.getOrderByClause(), aClone.getOrderByClause() );
+    assertEquals( meta.getXML(), aClone.getXML() );
   }
 }

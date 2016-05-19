@@ -1696,6 +1696,50 @@ public class KettleDatabaseRepositoryConnectionDelegate extends KettleDatabaseRe
     return null;
   }
 
+  static String createIdsWithValuesQuery( String tablename, String idfield, String lookupfield, int amount ) {
+    StringBuilder sb = new StringBuilder( 128 );
+    sb.append( "SELECT " ).append( idfield )
+      .append( " FROM " ).append( tablename )
+      .append( " WHERE " ).append( lookupfield )
+      .append( " IN (" );
+    for ( int i = 0; i < amount; i++ ) {
+      sb.append( '?' ).append( ',' );
+    }
+    sb.setCharAt( sb.length() - 1, ')' );
+    return sb.toString();
+  }
+
+  public Map<String, LongObjectId> getValueToIdMap( String tablename, String idfield, String lookupfield ) throws KettleException {
+    String sql = new StringBuilder( "SELECT " ).append( lookupfield ).append( ", " ).append( idfield )
+      .append( " FROM " ).append( tablename ).toString();
+
+    Map<String, LongObjectId> result = new HashMap<String, LongObjectId>();
+    for ( Object[] row : database.getRows( sql, new RowMeta(), new Object[]{}, ResultSet.FETCH_FORWARD, false, -1, null ) ) {
+      result.put( String.valueOf( row[0] ), new LongObjectId( ( (Number) row[ 1 ] ).longValue() ) );
+    }
+    return result;
+  }
+
+  public LongObjectId[] getIDsWithValues( String tablename, String idfield, String lookupfield,
+                                          String[] values ) throws KettleException {
+    String sql = createIdsWithValuesQuery( tablename, idfield, lookupfield, values.length );
+
+    RowMeta params = new RowMeta();
+    for ( int i = 0; i < values.length; i++ ) {
+      ValueMeta value = new ValueMeta( Integer.toString( i ), ValueMetaInterface.TYPE_STRING );
+      params.addValueMeta( value );
+    }
+
+    List<Object[]> rows = database.getRows( sql, params, values, ResultSet.FETCH_FORWARD, false, -1, null );
+
+    LongObjectId[] result = new LongObjectId[ rows.size() ];
+    int i = 0;
+    for ( Object[] row : rows ) {
+      result[ i++ ] = new LongObjectId( ( (Number) row[ 0 ] ).longValue() );
+    }
+    return result;
+  }
+
   public synchronized ObjectId getIDWithValue( String tablename, String idfield, String lookupfield, String value,
     String lookupkey, ObjectId key ) throws KettleException {
     RowMetaAndData par = new RowMetaAndData();

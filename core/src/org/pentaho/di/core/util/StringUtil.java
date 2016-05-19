@@ -127,7 +127,7 @@ public class StringUtil {
       return null;
     }
 
-    StringBuffer buffer = new StringBuffer();
+    StringBuilder buffer = new StringBuilder();
 
     String rest = aString;
 
@@ -185,7 +185,7 @@ public class StringUtil {
       return null;
     }
 
-    StringBuffer buffer = new StringBuffer();
+    StringBuilder buffer = new StringBuilder();
 
     String rest = aString;
 
@@ -354,7 +354,7 @@ public class StringUtil {
   }
 
   public static final String generateRandomString( int length, String prefix, String postfix, boolean uppercase ) {
-    StringBuffer buffer = new StringBuffer();
+    StringBuilder buffer = new StringBuilder();
 
     if ( !Const.isEmpty( prefix ) ) {
       buffer.append( prefix );
@@ -444,13 +444,13 @@ public class StringUtil {
   }
 
   /**
-   * Check if the stringBuffer supplied is empty. A StringBuffer is empty when it is null or when the length is 0
+   * Check if the StringBuilder supplied is empty. A StringBuilder is empty when it is null or when the length is 0
    *
    * @param string
-   *          The stringBuffer to check
-   * @return true if the stringBuffer supplied is empty
+   *          The StringBuilder to check
+   * @return true if the StringBuilder supplied is empty
    */
-  public static final boolean isEmpty( StringBuffer string ) {
+  public static final boolean isEmpty( StringBuilder string ) {
     return string == null || string.length() == 0;
   }
 
@@ -581,5 +581,20 @@ public class StringUtil {
     }
 
     return variable;
+  }
+
+  /**
+   * @param variable
+   *          the variable to look for, with the $ or % variable specification.
+   * @return true if the input is a variable, false otherwise
+   */
+  public static boolean isVariable( String variable ) {
+    if ( variable == null ) {
+      return false;
+    }
+    variable = variable.trim();
+    return variable.startsWith( UNIX_OPEN ) && variable.endsWith( UNIX_CLOSE )
+        || variable.startsWith( WINDOWS_OPEN ) && variable.endsWith( WINDOWS_CLOSE )
+        || variable.startsWith( HEX_OPEN ) && variable.endsWith( HEX_CLOSE );
   }
 }
